@@ -144,7 +144,8 @@ try {
   const screenshot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
   await writeFile(outputPath, Buffer.from(screenshot.data, 'base64'));
   const state = JSON.parse(stateResult.result.value);
-  const passed = state.onboardingHidden && !state.hudHidden && state.bossVisible && state.canvas[0] > 0 && runtimeErrors.length === 0;
+  // Boss HUD must remain hidden until the player actually enters combat.
+  const passed = state.onboardingHidden && !state.hudHidden && !state.bossVisible && state.canvas[0] > 0 && runtimeErrors.length === 0;
   process.stdout.write(`${JSON.stringify({ passed, interaction: interactionResult.result.value, state, runtimeErrors, screenshot: outputPath }, null, 2)}\n`);
   websocket.close();
   if (!passed) process.exitCode = 1;

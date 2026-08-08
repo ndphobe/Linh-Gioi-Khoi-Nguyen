@@ -1,6 +1,11 @@
 <!doctype html>
 <html lang="vi">
   <head>
+    <script>
+      // Chrome blocks module imports and online gameplay when index.html is
+      // opened as file://. Route local copies through the game server instead.
+      if (location.protocol === 'file:') location.replace('http://127.0.0.1:3000/');
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
@@ -212,6 +217,10 @@
                     <div class="control-item"><kbd>Q–G</kbd><span>Pháp thuật</span></div>
                     <div class="control-item"><kbd>Tab</kbd><span>Khóa mục tiêu</span></div>
                     <div class="control-item"><kbd>V / M</kbd><span>Tương tác / Bản đồ</span></div>
+                    <div class="control-item"><kbd>B</kbd><span>Túi đồ</span></div>
+                    <div class="control-item"><kbd>P</kbd><span>Cửa hàng</span></div>
+                    <div class="control-item"><kbd>K</kbd><span>Bảng kỹ năng</span></div>
+                    <div class="control-item"><kbd>Esc</kbd><span>Cài đặt / Đóng giao diện</span></div>
                   </div>
                 </div>
 
@@ -342,11 +351,6 @@
           </button>
         </div>
 
-        <div class="hud-help">
-          <span><kbd>Shift</kbd> Thân pháp</span>
-          <span><kbd>Phải</kbd> Đỡ / phản đòn</span>
-          <span><kbd>Tab</kbd> Khóa mục tiêu</span>
-        </div>
       </section>
 
       <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>

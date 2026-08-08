@@ -372,6 +372,8 @@ export function createEnemy({ type = 'spiritWolf', boss = false } = {}) {
   const normalized = String(type).toLowerCase();
   const isBoss = boss || normalized.includes('boss') || normalized.includes('guardian');
   const isCultivator = normalized.includes('cult') || normalized.includes('ranged') || normalized.includes('ma-tu');
+  const isFlameImp = normalized.includes('flame_imp');
+  const isSpiritFox = normalized.includes('spirit_fox');
   const group = new THREE.Group();
   group.name = `enemy-${type}`;
 
@@ -419,6 +421,22 @@ export function createEnemy({ type = 'spiritWolf', boss = false } = {}) {
     group.add(weapon);
     group.scale.setScalar(1.28);
     group.userData.kind = 'boss';
+  } else if (isFlameImp) {
+    const shadow = pixelMaterial({ color: 0x24172d, emissive: 0x741f48, emissiveIntensity: 0.55 });
+    const flame = createEnergyMaterial(0xff4778, 1.2);
+    const body = sphere(0.42, shadow, 8, 6);
+    body.scale.set(0.85, 1.08, 0.78);
+    body.position.y = 0.48;
+    group.add(body);
+    const crown = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.72, 6), flame);
+    crown.position.y = 1.05;
+    group.add(crown);
+    for (const x of [-0.14, 0.14]) {
+      const eye = box(0.08, 0.08, 0.05, pixelMaterial({ color: 0xffdf79, emissive: 0xff8a32, emissiveIntensity: 1.5 }));
+      eye.position.set(x, 0.57, -0.38);
+      group.add(eye);
+    }
+    group.userData.kind = 'trash';
   } else if (isCultivator) {
     const bodyMat = pixelMaterial({ color: 0x512a5c, roughness: 0.72 });
     const robe = cylinder(0.26, 0.54, 1.25, bodyMat, 7);
@@ -475,9 +493,11 @@ export function createEnemy({ type = 'spiritWolf', boss = false } = {}) {
       group.add(ridge);
     }
     group.userData.kind = 'melee';
+    if (isSpiritFox) group.scale.setScalar(0.62);
   }
 
-  const bar = healthBar(isBoss ? 2.6 : 1.55, isBoss ? 3.85 : 2.2);
+  const isTrash = isFlameImp || isSpiritFox;
+  const bar = healthBar(isBoss ? 2.6 : isTrash ? 1.15 : 1.55, isBoss ? 3.85 : isTrash ? 1.45 : 2.2);
   group.add(bar);
   group.userData.healthBar = bar;
   group.userData.baseY = 0;

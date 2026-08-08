@@ -64,6 +64,30 @@ export class AudioEngine {
 
   play(name) {
     switch (name) {
+      case 'ui':
+        this.tone({ frequency: 520, endFrequency: 680, duration: 0.055, type: 'triangle', gain: 0.035 });
+        break;
+      case 'coin':
+        this.tone({ frequency: 880, endFrequency: 1320, duration: 0.1, type: 'square', gain: 0.045 });
+        this.tone({ frequency: 1320, endFrequency: 1760, duration: 0.12, type: 'triangle', gain: 0.035, delay: 0.07 });
+        break;
+      case 'coin-drop':
+        this.tone({ frequency: 620, endFrequency: 360, duration: 0.09, type: 'triangle', gain: 0.035 });
+        this.tone({ frequency: 940, endFrequency: 710, duration: 0.08, type: 'square', gain: 0.025, delay: 0.06 });
+        break;
+      case 'cooldown-ready':
+        this.tone({ frequency: 740, endFrequency: 1040, duration: 0.16, type: 'sine', gain: 0.035 });
+        this.tone({ frequency: 1110, endFrequency: 1480, duration: 0.2, type: 'triangle', gain: 0.025, delay: 0.07 });
+        break;
+      case 'sect-sword':
+        this.noise(.08,.055,3200);this.tone({frequency:920,endFrequency:1540,duration:.16,type:'triangle',gain:.055});
+        break;
+      case 'sect-demon':
+        this.noise(.28,.13,520);this.tone({frequency:105,endFrequency:42,duration:.34,type:'sawtooth',gain:.095});
+        break;
+      case 'sect-poison':
+        this.noise(.22,.06,1450);this.tone({frequency:360,endFrequency:170,duration:.3,type:'sine',gain:.055});
+        break;
       case 'slash':
         this.noise(0.12, 0.12, 1800);
         this.tone({ frequency: 420, endFrequency: 105, duration: 0.16, type: 'sawtooth', gain: 0.08 });
@@ -71,6 +95,11 @@ export class AudioEngine {
       case 'hit':
         this.noise(0.09, 0.16, 540);
         this.tone({ frequency: 105, endFrequency: 55, duration: 0.11, type: 'square', gain: 0.08 });
+        break;
+      case 'block':
+        this.noise(0.08, 0.09, 3400);
+        this.tone({ frequency: 980, endFrequency: 520, duration: 0.14, type: 'square', gain: 0.075 });
+        this.tone({ frequency: 1480, endFrequency: 760, duration: 0.09, type: 'triangle', gain: 0.045 });
         break;
       case 'dash':
         this.noise(0.18, 0.08, 2500);

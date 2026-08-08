@@ -2,6 +2,8 @@ import { io } from 'socket.io-client';
 import { AudioEngine } from './game/AudioEngine.js';
 import { DEFAULT_PROFILE, FACTIONS } from './game/data.js';
 import { loadProfile, normalizeRoomCode, sanitizeName, saveProfile } from './game/rules.js';
+import { SaveSystem } from './game/SaveSystem.js';
+import { CharacterManager } from './game/CharacterManager.js';
 
 const STORAGE_KEY = 'van-kiep-tu-tien:profile:v1';
 const ROOM_KEY = 'van-kiep-tu-tien:last-room';
@@ -14,10 +16,25 @@ const status = document.getElementById('connection-status');
 const cards = [...document.querySelectorAll('.sect-card[data-sect]')];
 
 const stored = loadProfile(localStorage.getItem(STORAGE_KEY));
+const characterManager = new CharacterManager(new SaveSystem(localStorage));
 let selectedSect = FACTIONS[stored.factionId] ? stored.factionId : DEFAULT_PROFILE.factionId;
 let socket = null;
 let game = null;
 const audio = new AudioEngine();
+
+function renderSectPreviews() {
+  const atlas = new Image();
+  atlas.src = '/assets/sect-character-atlas.png';
+  atlas.onload = () => cards.forEach((card, row) => {
+    const host = card.querySelector('.sect-card__art'); if (!host) return;
+    host.querySelectorAll(':scope > *').forEach(node => node.remove());
+    const preview = document.createElement('canvas'); preview.className = 'sect-preview-canvas'; preview.width = 220; preview.height = 220;
+    const context = preview.getContext('2d'); context.imageSmoothingEnabled = false;
+    const sw = atlas.naturalWidth / 4, sh = atlas.naturalHeight / 3;
+    context.drawImage(atlas, 0, row * sh, sw, sh, 0, 0, 220, 220);
+    host.appendChild(preview);
+  });
+}
 
 function generatedName() {
   const family = ['Lạc', 'Vân', 'Diệp', 'Tần', 'Sở', 'Mặc', 'Bạch', 'Hàn'];
@@ -70,10 +87,10 @@ function showInputError(message) {
   requestAnimationFrame(() => row?.classList.add('is-shaking'));
 }
 
-function webglAvailable() {
+function canvas2DAvailable() {
   try {
     const probe = document.createElement('canvas');
-    return Boolean(window.WebGL2RenderingContext && probe.getContext('webgl2'));
+    return Boolean(probe.getContext('2d'));
   } catch {
     return false;
   }
@@ -86,8 +103,8 @@ async function beginJourney() {
     showInputError('Đạo hiệu cần ít nhất 2 ký tự.');
     return;
   }
-  if (!webglAvailable()) {
-    showInputError('Trình duyệt hoặc GPU chưa hỗ trợ WebGL 2.');
+  if (!canvas2DAvailable()) {
+    showInputError('Trình duyệt chưa hỗ trợ Canvas 2D.');
     return;
   }
   let roomCode = normalizeRoomCode(roomInput.value);
@@ -108,19 +125,28 @@ async function beginJourney() {
     ]),
   ]);
   const { CultivationGame } = await gameModulePromise;
+  const activeCharacter=characterManager.selectByFaction(selectedSect,name);
 
   const clientProfile = {
     name,
     faction: selectedSect,
     sect: selectedSect,
     roomCode,
-    realm: stored.realmId || 'foundation',
-    realmName: stored.realmId === 'golden_core' ? 'Kim Đan Sơ Kỳ' : 'Trúc Cơ Hậu Kỳ',
-    qi: 0,
+    characterId: activeCharacter.id,
+    realm: activeCharacter.realm,
+    realmName: activeCharacter.realmName,
+    qi: activeCharacter.currentExp,
     hp: 120,
     maxHp: 120,
     mp: 100,
     maxMp: 100,
+    manaRegen: 3.5,
+    minorLevel: activeCharacter.minorLevel,
+    skillSystem: activeCharacter.skillSystem,
+    shopSystem: {gold:activeCharacter.gold,inventory:activeCharacter.inventory,equipment:activeCharacter.equipment},
+    gold: activeCharacter.gold,
+    allocatedStats: activeCharacter.allocatedStats,
+    currentRegion: activeCharacter.currentRegion,
   };
 
   onboarding.classList.add('is-departing');
@@ -136,6 +162,7 @@ async function beginJourney() {
     profile: clientProfile,
     audio,
     onProfileChange: (next) => {
+      characterManager.updateActive(next);
       const realmId = next.realm === 'goldenCore' || next.realm === 'golden_core' || next.flightUnlocked ? 'golden_core' : 'foundation';
       localStorage.setItem(STORAGE_KEY, saveProfile({
         ...stored,
@@ -144,6 +171,9 @@ async function beginJourney() {
         realmId,
         cultivation: next.qi,
         questPhase: next.flightUnlocked ? 'complete' : 'arrival',
+        skillSystem: next.skillSystem,
+        shopSystem: next.shopSystem,
+        currentRegion: next.currentRegion,
       }));
     },
     onExit: returnToOnboarding,
@@ -193,4 +223,5 @@ document.querySelector('[data-action="leave-game"]')?.addEventListener('click', 
 nameInput.value = stored.name && stored.name !== DEFAULT_PROFILE.name ? stored.name : generatedName();
 roomInput.value = normalizeRoomCode(sessionStorage.getItem(ROOM_KEY) ?? '');
 selectSect(selectedSect);
+renderSectPreviews();
 connectLobby();

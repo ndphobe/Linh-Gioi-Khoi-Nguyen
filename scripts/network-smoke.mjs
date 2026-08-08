@@ -48,7 +48,7 @@ try {
   clients.push(first.socket);
   const second = await connect('Huyết Ảnh', 'demonic');
   clients.push(second.socket);
-  const snapshot = await waitForSnapshot(first.socket, (next) => next.players?.length === 2 && next.enemies?.length === 6);
+  const snapshot = await waitForSnapshot(first.socket, (next) => next.players?.length === 2 && next.enemies?.length >= 6);
   const meditation = await emitWithAck(first.socket, 'cultivation:meditate', { active: true });
   const block = await emitWithAck(first.socket, 'combat:block', { active: true });
   const ability = await emitWithAck(second.socket, 'combat:ability', { ability: 'basic', aim: { x: 0, z: -1 } });

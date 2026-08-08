@@ -232,6 +232,15 @@ export function normalizeProfile(profile = {}) {
         PROTOTYPE_SCOPE.lightningWaves,
       ),
     ),
+    skillSystem: source.skillSystem && typeof source.skillSystem === "object"
+      ? JSON.parse(JSON.stringify(source.skillSystem))
+      : undefined,
+    shopSystem: source.shopSystem && typeof source.shopSystem === "object"
+      ? JSON.parse(JSON.stringify(source.shopSystem))
+      : undefined,
+    currentRegion: ["sect_hall", "luoyang", "spirit_mine", "heaven_sect"].includes(source.currentRegion)
+      ? source.currentRegion
+      : "sect_hall",
     settings: {
       masterVolume: numberWithin(
         settings.masterVolume,

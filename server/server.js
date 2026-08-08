@@ -208,6 +208,17 @@ function registerSocketHandlers(io, world, logger) {
       }
     });
 
+    socket.on("player:fast-travel", (payload = {}, ack) => {
+      try {
+        const room = currentRoom(world, socket);
+        if (!room) throw makeNotInRoomError();
+        const player = room.fastTravel(socket.id, payload?.regionId, Date.now());
+        safeAck(ack, { ok: true, player });
+      } catch (error) {
+        reportSocketError(socket, error, ack, logger);
+      }
+    });
+
     socket.on("combat:block", (payload = {}, ack) => {
       try {
         const room = currentRoom(world, socket);
@@ -291,6 +302,11 @@ export async function createGameServer(options = {}) {
   app.use((_request, response, next) => {
     response.setHeader("X-Content-Type-Options", "nosniff");
     response.setHeader("Referrer-Policy", "same-origin");
+    // The game changes frequently during development. Stale HTML/module
+    // bundles in Chrome otherwise make new UI and mechanics appear missing.
+    response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    response.setHeader("Pragma", "no-cache");
+    response.setHeader("Expires", "0");
     next();
   });
 
@@ -316,7 +332,7 @@ export async function createGameServer(options = {}) {
     app.use(vite.middlewares);
   } else {
     const dist = path.join(root, "dist");
-    app.use(express.static(dist, { index: false, maxAge: "1h" }));
+    app.use(express.static(dist, { index: false, maxAge: 0, etag: false, lastModified: false }));
     app.use((request, response, next) => {
       if (request.method !== "GET" || !request.accepts("html")) return next();
       response.sendFile(path.join(dist, "index.html"), (error) => {

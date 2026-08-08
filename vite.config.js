@@ -3,6 +3,10 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   server: {
     host: '0.0.0.0',
+    cors: true,
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    },
     watch: {
       ignored: ['**/.chrome-*/**', '**/onboarding-check.png', '**/gameplay-check.png'],
     },

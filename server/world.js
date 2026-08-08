@@ -117,44 +117,84 @@ export const ABILITIES = Object.freeze({
   }),
 });
 
-const ENEMY_TEMPLATES = Object.freeze({
+// Central balance knobs. Keep server authoritative and mirror presentation
+// values in src/game/data.js. Multipliers are applied to the old baseline.
+export const MONSTER_BALANCE = Object.freeze({
+  hpMultiplier: 0.60,
+  attackMultiplier: 0.65,
+  movementMultiplier: 0.78,
+  detectionMultiplier: 0.72,
+  hitStunMs: 480,
+});
+
+const balanced = (value, multiplier) => Math.round(value * multiplier * 100) / 100;
+
+export const ENEMY_TEMPLATES = Object.freeze({
+  spirit_fox: Object.freeze({
+    label: "Linh Hồ Con",
+    maxHp: 38,
+    speed: 2.35,
+    damage: 4,
+    attackRange: 1.35,
+    aggroRange: 9,
+    attackCooldownMs: 1_650,
+    respawnMs: 5_000,
+    reward: Object.freeze({ linhThach: 1, qi: 3, gold: 12 }),
+    trashMob: true,
+  }),
+  flame_imp: Object.freeze({
+    label: "Tiểu Hỏa Ma",
+    maxHp: 45,
+    speed: 2.1,
+    damage: 5,
+    attackRange: 1.5,
+    aggroRange: 10,
+    attackCooldownMs: 1_750,
+    respawnMs: 5_500,
+    reward: Object.freeze({ linhThach: 2, qi: 4, gold: 15 }),
+    trashMob: true,
+  }),
   spirit_wolf: Object.freeze({
     label: "Thanh Phong Yêu Lang",
-    maxHp: 72,
-    speed: 3.4,
-    damage: 8,
+    maxHp: balanced(72, MONSTER_BALANCE.hpMultiplier),
+    speed: balanced(3.4, MONSTER_BALANCE.movementMultiplier),
+    damage: balanced(8, MONSTER_BALANCE.attackMultiplier),
     attackRange: 1.7,
-    aggroRange: 19,
+    aggroRange: balanced(19, MONSTER_BALANCE.detectionMultiplier),
     attackCooldownMs: 1_250,
     respawnMs: 7_000,
-    reward: Object.freeze({ linhThach: 4, qi: 7 }),
+    reward: Object.freeze({ linhThach: 4, qi: 7, gold: 20 }),
   }),
   rogue_cultivator: Object.freeze({
     label: "Hắc Vụ Ma Tu",
-    maxHp: 94,
-    speed: 2.35,
-    damage: 10,
+    maxHp: balanced(94, MONSTER_BALANCE.hpMultiplier),
+    speed: balanced(2.35, MONSTER_BALANCE.movementMultiplier),
+    damage: balanced(10, MONSTER_BALANCE.attackMultiplier),
     attackRange: 8.5,
-    aggroRange: 22,
+    aggroRange: balanced(22, MONSTER_BALANCE.detectionMultiplier),
     attackCooldownMs: 1_850,
     respawnMs: 9_000,
-    reward: Object.freeze({ linhThach: 3, linhThao: 1, qi: 9 }),
+    reward: Object.freeze({ linhThach: 3, linhThao: 1, qi: 9, gold: 28 }),
   }),
   fallen_guardian: Object.freeze({
     label: "Lôi Linh Hộ Pháp",
-    maxHp: 620,
-    speed: 2.15,
-    damage: 20,
+    maxHp: balanced(620, MONSTER_BALANCE.hpMultiplier),
+    speed: balanced(2.15, MONSTER_BALANCE.movementMultiplier),
+    damage: balanced(20, MONSTER_BALANCE.attackMultiplier),
     attackRange: 3.2,
-    aggroRange: 34,
+    aggroRange: balanced(34, MONSTER_BALANCE.detectionMultiplier),
     attackCooldownMs: 2_200,
     respawnMs: 30_000,
-    reward: Object.freeze({ linhThach: 25, linhCot: 1, hoTamDan: 1, qi: 42 }),
+    reward: Object.freeze({ linhThach: 25, linhCot: 1, hoTamDan: 1, qi: 42, gold: 180 }),
     isBoss: true,
   }),
 });
 
 const ENEMY_SPAWNS = Object.freeze([
+  Object.freeze({ id: "fox-1", type: "spirit_fox", x: -6, y: 0, z: 10 }),
+  Object.freeze({ id: "fox-2", type: "spirit_fox", x: 7, y: 0, z: 8 }),
+  Object.freeze({ id: "imp-1", type: "flame_imp", x: 2, y: 0, z: 3 }),
+  Object.freeze({ id: "imp-2", type: "flame_imp", x: -8, y: 0, z: -2 }),
   Object.freeze({ id: "wolf-1", type: "spirit_wolf", x: -11, y: 0, z: 4 }),
   Object.freeze({ id: "wolf-2", type: "spirit_wolf", x: 10, y: 0, z: 1 }),
   Object.freeze({ id: "wolf-3", type: "spirit_wolf", x: -3, y: 0, z: -6 }),
@@ -173,6 +213,13 @@ const GOLDEN_CORE_REALM = Object.freeze({
   id: "golden_core",
   name: "Kim Đan sơ kỳ",
   order: 3,
+});
+
+const FAST_TRAVEL_REGIONS = Object.freeze({
+  sect_hall: Object.freeze({ requiredOrder: 1, portal: { x: 0, y: 0, z: 26 }, townGate: { x: 0, y: 0, z: 26 } }),
+  luoyang: Object.freeze({ requiredOrder: 2, portal: { x: 28, y: 0, z: -8 }, townGate: { x: 25, y: 0, z: -5 } }),
+  spirit_mine: Object.freeze({ requiredOrder: 2, portal: { x: 18, y: 0, z: 34 }, townGate: { x: 16, y: 0, z: 31 } }),
+  heaven_sect: Object.freeze({ requiredOrder: 3, portal: { x: -30, y: 0, z: -18 }, townGate: { x: -27, y: 0, z: -16 } }),
 });
 
 function gameError(code, message) {
@@ -346,6 +393,8 @@ function createPlayer(id, identity, spawn, now) {
     mp: 100,
     maxMp: 100,
     qi: 0,
+    gold: 0,
+    currentRegion: 'sect_hall',
     maxQi: 100,
     shield: 0,
     shieldUntil: 0,
@@ -397,6 +446,7 @@ function createEnemy(spawn) {
     pendingAttack: null,
     attackCount: 0,
     slowUntil: 0,
+    stunnedUntil: 0,
     contributors: new Set(),
   };
 }
@@ -445,6 +495,8 @@ function serializePublicPlayer(player, now) {
     mp: Math.floor(player.mp),
     maxMp: player.maxMp,
     qi: Math.floor(player.qi),
+    gold: Math.floor(player.gold),
+    currentRegion: player.currentRegion,
     maxQi: player.maxQi,
     cultivation: Math.floor(player.qi),
     cultivationRequired: player.maxQi,
@@ -642,14 +694,21 @@ export class GameRoom {
     player.yaw = Math.atan2(aim.x, aim.z);
 
     const hitIds = [];
+    const combatAbility = { ...ability };
+    if (player.faction === "orthodox") combatAbility.range = ability.range * 1.25;
+    if (player.faction === "demonic" && ability.targetMode === "area") combatAbility.radius = ability.radius * 1.35;
+    if (player.faction === "heretic" && key !== "basic") combatAbility.slowMs = Math.max(ability.slowMs ?? 0, 3000);
     if (ability.targetMode === "self") {
       player.hp = Math.min(player.maxHp, player.hp + ability.heal);
       player.shield = Math.max(player.shield, ability.shield);
       player.shieldUntil = now + ability.shieldMs;
     } else {
-      const targets = this.selectAbilityTargets(player, ability, aim, payload.targetId);
+      const targets = this.selectAbilityTargets(player, combatAbility, aim, payload.targetId);
       for (const enemy of targets) {
-        this.damageEnemy(enemy, ability.damage, player, now, ability);
+        if (player.faction === "orthodox" && ["basic", "Q", "E"].includes(key)) {
+          for (let strike = 0; strike < 3; strike += 1) this.damageEnemy(enemy, ability.damage * 0.46, player, now + strike * 35, combatAbility);
+        } else this.damageEnemy(enemy, player.faction === "heretic" ? ability.damage * 1.12 : ability.damage, player, now, combatAbility);
+        if (player.faction === "demonic") player.hp = Math.min(player.maxHp, player.hp + ability.damage * 0.14);
         hitIds.push(enemy.id);
       }
     }
@@ -660,6 +719,7 @@ export class GameRoom {
       aim,
       targetId: typeof payload.targetId === "string" ? payload.targetId : null,
       hitIds,
+      faction: player.faction,
     }, now);
     return { ability: key, hitIds, player: serializePublicPlayer(player, now) };
   }
@@ -722,6 +782,7 @@ export class GameRoom {
     if (damage <= 0) return 0;
     enemy.hp = Math.max(0, enemy.hp - damage);
     enemy.contributors.add(player.id);
+    enemy.stunnedUntil = Math.max(enemy.stunnedUntil, now + MONSTER_BALANCE.hitStunMs);
     if (ability.slowMs) enemy.slowUntil = Math.max(enemy.slowUntil, now + ability.slowMs);
     player.qi = Math.min(player.maxQi, player.qi + damage * 0.08);
     this.pushEvent("enemy:damaged", {
@@ -756,11 +817,15 @@ export class GameRoom {
           const before = player.qi;
           player.qi = Math.min(player.maxQi, player.qi + amount);
           granted.qi = round(player.qi - before);
+        } else if (resource === "gold") {
+          player.gold += amount;
+          granted.gold = amount;
         } else if (Object.hasOwn(player.inventory, resource)) {
           player.inventory[resource] += amount;
           granted[resource] = amount;
         }
       }
+      if (enemy.isBoss) granted.bossEquipment = "thunder_guard_talisman";
       this.pushEvent("loot:granted", { playerId, enemyId: enemy.id, loot: granted }, now);
     }
 
@@ -778,9 +843,6 @@ export class GameRoom {
     const shouldMeditate = Boolean(active);
     if (shouldMeditate) {
       if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể tĩnh tọa khi đang trọng thương.");
-      if (!isInSafeZone(player.position)) {
-        throw gameError("NOT_IN_SAFE_ZONE", "Hãy trở về Tông Môn để tĩnh tọa.");
-      }
       if (player.breakthrough.status !== "idle") {
         throw gameError("ACTION_BLOCKED", "Đang trong quá trình đột phá.");
       }
@@ -848,7 +910,7 @@ export class GameRoom {
     }
 
     if (player.shield > 0 && now >= player.shieldUntil) player.shield = 0;
-    player.mp = Math.min(player.maxMp, player.mp + deltaSeconds * (player.meditating ? 12 : 3.5));
+    player.mp = Math.min(player.maxMp, player.mp + deltaSeconds * (player.meditating ? 14 : 3.5));
     if (player.meditating) {
       player.hp = Math.min(player.maxHp, player.hp + deltaSeconds * 5);
       player.qi = Math.min(player.maxQi, player.qi + deltaSeconds * 8);
@@ -963,6 +1025,10 @@ export class GameRoom {
     }
     if (this.players.size === 0) {
       enemy.targetId = null;
+      enemy.pendingAttack = null;
+      return;
+    }
+    if (enemy.stunnedUntil > now) {
       enemy.pendingAttack = null;
       return;
     }
@@ -1093,13 +1159,12 @@ export class GameRoom {
     if (player.blocking) {
       const perfectParry = source?.kind !== "lightning" && now <= player.parryUntil;
       if (perfectParry) {
-        player.blocking = false;
         const enemy = source?.id ? this.enemies.get(source.id) : null;
         if (enemy) enemy.nextAttackAt = Math.max(enemy.nextAttackAt, now + 1_100);
         this.pushEvent("player:parried", { playerId: player.id, source }, now);
         return 0;
       }
-      damage *= source?.kind === "lightning" ? 0.65 : 0.45;
+      damage *= 0.30;
       player.mp = Math.max(0, player.mp - 4);
       this.pushEvent("player:blocked", {
         playerId: player.id,
@@ -1116,7 +1181,6 @@ export class GameRoom {
 
     player.hp = Math.max(0, player.hp - damage);
     player.meditating = false;
-    player.blocking = false;
     this.pushEvent("player:damaged", {
       playerId: player.id,
       source,
@@ -1175,6 +1239,7 @@ export class GameRoom {
     enemy.pendingAttack = null;
     enemy.attackCount = 0;
     enemy.slowUntil = 0;
+    enemy.stunnedUntil = 0;
     enemy.contributors.clear();
     this.pushEvent("enemy:respawned", { enemyId: enemy.id, position: copyPosition(enemy.position) }, now);
   }
@@ -1183,6 +1248,23 @@ export class GameRoom {
     const player = this.players.get(id);
     if (!player) throw gameError("NOT_IN_ROOM", "Người chơi chưa vào phòng.");
     return player;
+  }
+
+  fastTravel(id, regionId, now = Date.now()) {
+    const player = this.requirePlayer(id);
+    const region = FAST_TRAVEL_REGIONS[regionId];
+    if (!region) throw gameError('INVALID_REGION', 'Khu vực không tồn tại.');
+    if (!player.alive || player.breakthrough.status !== 'idle') throw gameError('ACTION_BLOCKED', 'Không thể dịch chuyển lúc này.');
+    if (player.realm.order < region.requiredOrder) throw gameError('REALM_REQUIRED', 'Cảnh giới chưa đủ để đến khu vực này.');
+    const destination = player.currentRegion === regionId ? region.portal : region.townGate;
+    player.position = copyPosition(destination);
+    player.currentRegion = regionId;
+    player.meditating = false;
+    player.blocking = false;
+    player.movementCredit = 0.65;
+    player.lastMoveAt = now;
+    this.pushEvent('player:fast-traveled', { playerId: id, regionId, position: copyPosition(destination) }, now);
+    return serializePublicPlayer(player, now);
   }
 
   snapshot(now = Date.now()) {

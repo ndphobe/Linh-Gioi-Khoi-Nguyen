@@ -3,12 +3,30 @@ import test from "node:test";
 
 import {
   BREAKTHROUGH_ALTAR,
+  ENEMY_TEMPLATES,
   GameRoom,
   GameWorld,
+  MONSTER_BALANCE,
   sanitizeFaction,
   sanitizeName,
   sanitizeRoomCode,
 } from "../server/world.js";
+
+test("monster balance applies requested nerfs and trash mobs die in 2-3 basic hits", () => {
+  assert.equal(MONSTER_BALANCE.hpMultiplier, 0.60);
+  assert.equal(MONSTER_BALANCE.attackMultiplier, 0.65);
+  assert.ok(MONSTER_BALANCE.hitStunMs >= 450);
+  assert.ok(ENEMY_TEMPLATES.spirit_fox.maxHp <= 18 * 3);
+  assert.ok(ENEMY_TEMPLATES.flame_imp.maxHp <= 18 * 3);
+  const room = new GameRoom("TRASH");
+  const player = room.addPlayer("p1", { name: "Kiếm Tu" }, 1_000);
+  const fox = room.enemies.get("fox-1");
+  room.damageEnemy(fox, 18, player, 2_000);
+  assert.equal(fox.stunnedUntil, 2_000 + MONSTER_BALANCE.hitStunMs);
+  room.damageEnemy(fox, 18, player, 2_500);
+  room.damageEnemy(fox, 18, player, 3_000);
+  assert.equal(fox.alive, false);
+});
 
 test("join identity is sanitized and rooms never exceed eight players", () => {
   const room = new GameRoom("demo-01");
@@ -58,6 +76,16 @@ test("authoritative movement clamps teleport attempts and locked flight", () => 
   assert.equal(player.sequence, 3);
 });
 
+test("fast travel is realm-gated and uses town gates then local portals", () => {
+  const room = new GameRoom("TRAVEL");
+  room.addPlayer("traveler", { name: "Lữ Khách" }, 1_000);
+  const first = room.fastTravel("traveler", "luoyang", 1_100);
+  assert.deepEqual(first.position, { x: 25, y: 0, z: -5 });
+  const second = room.fastTravel("traveler", "luoyang", 1_200);
+  assert.deepEqual(second.position, { x: 28, y: 0, z: -8 });
+  assert.throws(() => room.fastTravel("traveler", "heaven_sect", 1_300));
+});
+
 test("boss loot and cultivation resources are awarded by the room", () => {
   const room = new GameRoom("BOSS");
   const player = room.addPlayer("p1", { name: "Kiếm Tu" }, 1_000);
@@ -69,8 +97,10 @@ test("boss loot and cultivation resources are awarded by the room", () => {
   assert.equal(player.inventory.hoTamDan, 1);
   assert.equal(player.inventory.linhCot, 1);
   assert.equal(player.inventory.linhThach, 25);
+  assert.equal(player.gold, 180);
   assert.ok(player.qi > 0);
-  assert.ok(room.drainEvents().some((event) => event.type === "loot:granted"));
+  const lootEvent = room.drainEvents().find((event) => event.type === "loot:granted");
+  assert.equal(lootEvent.loot.bossEquipment, "thunder_guard_talisman");
 });
 
 test("server-owned block reduces damage and a timed parry negates it", () => {
@@ -87,8 +117,10 @@ test("server-owned block reduces damage and a timed parry negates it", () => {
 
   room.setBlocking(player.id, true, 2_000);
   const reduced = room.damagePlayer(player, 30, { kind: "melee", id: "wolf-1" }, 2_500);
-  assert.equal(reduced, 13.5);
-  assert.equal(player.hp, initialHp - 13.5);
+  assert.equal(reduced, 9);
+  assert.equal(player.hp, initialHp - 9);
+  const heldBlock = room.damagePlayer(player, 30, { kind: "melee", id: "wolf-1" }, 2_700);
+  assert.equal(heldBlock, 9);
 });
 
 test("three server-timed lightning waves unlock Kim Đan flight on survival", () => {
