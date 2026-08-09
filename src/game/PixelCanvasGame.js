@@ -1,8 +1,8 @@
 import { FACTIONS } from './data.js';
-import { CULTIVATION_REALMS, SkillSystemManager, cooldownVisual } from './SkillSystem.js';
+import { CULTIVATION_REALMS, SkillSystemManager, cooldownVisual, skillThemeColor, vietnameseSkillGlyph } from './SkillSystem.js';
 import { HUDManager } from './HUDManager.js';
 import { MapManager, REGIONS } from './MapManager.js';
-import { ShopSystem, SHOP_ITEMS, itemById } from './ShopSystem.js';
+import { ShopSystem, SHOP_ITEMS, itemById, itemForFaction } from './ShopSystem.js';
 import { InventorySystem } from './InventorySystem.js';
 import { LootManager } from './LootManager.js';
 import { BossController } from './BossController.js';
@@ -10,7 +10,7 @@ import { GoldDropSystem } from './GoldDropSystem.js';
 import { VFXManager } from './VFXManager.js';
 import { getSectCombatData } from './SectData.js';
 import { Player } from './Player.js';
-import { CultivationSystem } from './CultivationSystem.js';
+import { CultivationSystem, tribulationGateForLevel } from './CultivationSystem.js';
 import { ItemSystem } from './ItemSystem.js';
 import { AnimationController, MONSTER_ANIMATION_CLIPS, PLAYER_ANIMATION_CLIPS } from './AnimationController.js';
 import { CombatSystem } from './CombatSystem.js';
@@ -30,6 +30,7 @@ const COLORS = Object.freeze({
   heretic: { robe: '#193c36', trim: '#81e65a', dark: '#111c22', aura: '#7aff71' },
 });
 const KEYS_TO_SLOT = { KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f', KeyG: 'g' };
+const TRIBULATION_WAVES = 2;
 const REGION_THEMES = Object.freeze({
   sect_hall:{base:'#17191e',tileA:'#30272a',tileB:'#292328',line:'#54383c',accent:'#c69a45',mini:'#30272a',prop:'palace'},
   luoyang:{base:'#252019',tileA:'#514638',tileB:'#453b31',line:'#6c5c47',accent:'#e5a24b',mini:'#544a38',prop:'city'},
@@ -54,38 +55,40 @@ export class CultivationGame {
     });
     this.skillSystem = new SkillSystemManager({ faction: this.profile.faction, realmId: this.cultivationSystem.realmId, minorLevel: this.cultivationSystem.subStage, state: this.profile.skillSystem });
     this.shopSystem = new ShopSystem(this.profile.shopSystem ?? { gold: this.profile.gold });
+    this.skillSystem.availableGold=this.shopSystem.gold;
     this.profile.currentRegion ??= 'sect_hall';
     this.player = new Player(this.profile, this.cultivationSystem, { position: { x: 0, y: 0, z: 26 }, velocity: { x: 0, z: 0 }, facing: 4, aimAngle: 0, action: 'idle' });
     this.animationController = new AnimationController(PLAYER_ANIMATION_CLIPS);
     this.camera = { x: 0, z: 26 };
     this.state = { running: false, paused: false, meditation: false, dashTime: 0, dashCooldown: 0, invulnerableUntil: 0, joined: false };
+    this.profile.resources = { linhThach:0, linhThao:0, linhCot:0, hoTamDan:0, ...(this.profile.resources??{}) };
     this.keys = new Set(); this.enemies = new Map(); this.remotePlayers = new Map();
-    this.effects = []; this.pendingEffects = []; this.damageNumbers = []; this.cooldowns = new Map(); this.cooldownTotals = new Map(); this.lastFrame = performance.now(); this.netTime = 0;
-    this.mouse = { x: 0, y: 0, active: false }; this.pointTarget = null;
+    this.effects = []; this.pendingEffects = []; this.damageNumbers = []; this.cooldowns = new Map(); this.cooldownTotals = new Map(); this.pendingCasts = new Set(); this.castWarningTimes = new Map(); this.lastFrame = performance.now(); this.netTime = 0;
+    this.mouse = { x: 0, y: 0, active: false }; this.pointTarget = null; this.lockedTargetId = null;
     this.hudVisibleUntil = performance.now() + 10_000; this.hudHover = false; this.bossEngaged = false;
-    this.tribulation = null; this.cultivationTick = 0; this.bossCombatUntil = 0;
+    this.bossCombatUntil = 0;
     this.terrainProps = this.createTerrainProps();
     this.sprite = new Image(); this.sprite.src = '/assets/sect-character-atlas.png';
     this.monsterSprite = new Image(); this.monsterSprite.src = '/assets/xianxia-monsters-atlas-v2-packed.png';
+    this.cleanup = [];
     this.ui = this.collectUI();
     this.sceneManager={load:scene=>{if(scene==='MainMenu'){this.destroy();this.onExit?.();}},respawnAtHall:()=>this.respawnAtHall()};
     this.uiManager=new UIManager({app:this.ui.app,onMainMenu:()=>this.sceneManager.load('MainMenu'),onRespawn:()=>this.sceneManager.respawnAtHall()});
     this.combatSystem=new CombatSystem({enemies:()=>this.enemies.values()});
     this.hudManager = new HUDManager(active => { this.state.paused = Boolean(active && active !== 'tribulation'); });
     this.hudManager.register('pause', this.ui.pauseMenu); this.hudManager.register('map', this.ui.worldMap);
-    this.skillTreePanel=new SkillTreePanel({app:this.ui.app,hudManager:this.hudManager,skillSystem:this.skillSystem,onChange:({state})=>{this.profile.skillSystem=state;this.onProfileChange?.(this.profile);this.updateUI();}});
+    this.skillTreePanel=new SkillTreePanel({app:this.ui.app,hudManager:this.hudManager,skillSystem:this.skillSystem,onAction:action=>this.performSkillAction(action),onChange:({state})=>{this.profile.skillSystem=state;this.onProfileChange?.(this.profile);this.updateUI();}});
     this.mapManager = new MapManager({ overlay: this.ui.worldMap, realmOrder: this.realmOrder(), currentRegion: this.profile.currentRegion, onTeleport: (target, region) => this.fastTravel(target, region), onClose: () => this.hudManager.close('map') });
     this.ensureGoldCounter(); this.ensureAttackStat(); this.ensureShopUI();
-    this.ensureInventoryUI();
+    this.ensureInventoryUI(); this.ensureEquippedHud(); this.ensureTouchControls();
     this.inventorySystem=new InventorySystem(this.shopSystem,this.profile);
-    this.itemSystem=new ItemSystem({player:this.player,shopSystem:this.shopSystem,itemLookup:itemById,onChange:()=>this.persistEconomy(),onHealthChange:()=>this.updateUI()});
+    this.itemSystem=new ItemSystem({player:this.player,shopSystem:this.shopSystem,itemLookup:id=>itemForFaction(id,this.profile.faction),onChange:()=>this.persistEconomy(),onHealthChange:()=>this.updateUI()});
     this.itemSystem.syncEquipment();
     this.goldDropSystem=new GoldDropSystem({screen:world=>this.screen(world),audio:this.audio,onPickup:amount=>this.collectGold(amount)});
     this.vfxManager=new VFXManager({screen:world=>this.screen(world),audio:this.audio,collisionTest:(effect,position)=>this.combatSystem.collisionAt(position,effect.hitboxWidth,effect.hitIds)});
     this.lootManager=new LootManager({inventory:this.inventorySystem,audio:this.audio,onGold:(amount,event)=>this.dropGoldFromEvent(amount,event),onBossReward:id=>this.toast(`Đã nhận Trang Bị Boss: ${itemById(id)?.name??id}`,'legendary'),onChange:()=>this.persistEconomy()});
     this.bossController=new BossController({onDefeated:()=>this.goldBurst()});
     this.hudManager.bindCurrency('gold',this.ui.goldCount);this.hudManager.updateCurrency('gold',this.shopSystem.gold);
-    this.cleanup = [];
     this.bound = { keydown: e => this.keydown(e), keyup: e => this.keys.delete(e.code), resize: () => this.resize(), loop: t => this.loop(t) };
     this.attach(); this.attachSocket(); this.resize();
   }
@@ -138,7 +141,7 @@ export class CultivationGame {
   join() {
     if(!this.socket||this.joinInFlight)return;
     this.joinInFlight=true;
-    this.socket?.emit('room:join', { roomCode: this.profile.roomCode, room: this.profile.roomCode, name: this.profile.name, faction: this.profile.faction, sect: this.profile.faction,session:{gold:this.shopSystem.gold,inventory:this.shopSystem.inventory,equipment:this.shopSystem.equipment,cultivationSystem:this.cultivationSystem.serialize()} }, response => {
+    this.socket?.emit('room:join', { roomCode: this.profile.roomCode, room: this.profile.roomCode, name: this.profile.name, faction: this.profile.faction, sect: this.profile.faction,resumeToken:this.profile.resumeToken,session:{gold:this.shopSystem.gold,inventory:this.shopSystem.inventory,equipment:this.shopSystem.equipment,cultivationSystem:this.cultivationSystem.serialize(),skillSystem:this.skillSystem.serialize(),currentRegion:this.profile.currentRegion,resources:this.profile.resources} }, response => {
       this.joinInFlight=false;
       if (response?.ok === false) return this.toast(response?.error?.message??response.message, 'error');
       this.state.joined = true; if (response?.snapshot) this.snapshot(response.snapshot); if (response?.player) this.mergeSelf(response.player);
@@ -151,12 +154,14 @@ export class CultivationGame {
     if (event.repeat) return;
     if(!this.player.canAct)return;
     this.keys.add(event.code);
-    if(event.code==='Space'&&this.tribulation?.active){event.preventDefault();this.resolveTribulationInput();return;}
+    if(event.code==='Space'){event.preventDefault();return this.dash();}
     if (event.code === 'Escape') { if(this.hudManager.active)return this.hudManager.close(); return this.togglePause(true); }
     if (event.code === 'KeyM') return this.toggleWorldMap();
     if (event.code === 'KeyK') return this.toggleSkillTree();
     if (event.code === 'KeyP') return this.toggleShop();
-    if (event.code === 'KeyB') return this.toggleInventory();
+    if (event.code === 'KeyB') return this.canRequestBreakthrough() ? this.requestBreakthrough() : this.toggleInventory();
+    if (event.code === 'KeyN') return this.requestBreakthrough();
+    if (event.code === 'Tab') { event.preventDefault(); return this.cycleTarget(); }
     if (event.code === 'KeyC') return this.toggleMeditation();
     if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') return this.dash();
     if (KEYS_TO_SLOT[event.code]) this.cast(KEYS_TO_SLOT[event.code]);
@@ -174,7 +179,7 @@ export class CultivationGame {
 
   updatePointer(event) { const rect=this.canvas.getBoundingClientRect();this.mouse.x=(event.clientX-rect.left)*this.canvas.width/rect.width;this.mouse.y=(event.clientY-rect.top)*this.canvas.height/rect.height;this.mouse.active=true;const dx=this.mouse.x-this.canvas.width/2,dy=this.mouse.y-this.canvas.height/2;this.player.aimAngle=Math.atan2(dy,dx);this.hudHover=Math.hypot(dx,dy)<42;const enemyHover=[...this.enemies.values()].some(enemy=>{if(enemy.alive===false)return false;const p=this.screen(enemy.position);return Math.hypot(p.x-this.mouse.x,p.y-18-this.mouse.y)<24;});this.canvas.classList.toggle('is-enemy-hover',enemyHover); }
   setPointTarget(){this.pointTarget={x:this.camera.x+(this.mouse.x-this.canvas.width/2)/18,z:this.camera.z+(this.mouse.y-this.canvas.height/2)/12};}
-  setBlocking(active){if((active&&!this.player.canAct)||this.state.paused||this.tribulation?.active)return;this.state.blocking=Boolean(active);this.player.action=active?'block':'idle';this.player.actionTime=0;this.socket?.emit('combat:block',{active:Boolean(active)});}
+  setBlocking(active){if((active&&!this.player.canAct)||this.state.paused||this.state.breakthroughActive)return;this.state.blocking=Boolean(active);this.player.action=active?'block':'idle';this.player.actionTime=0;this.socket?.emit('combat:block',{active:Boolean(active)});}
 
   dash() {
     if (!this.player.canAct || this.state.dashCooldown > 0 || this.state.meditation) return;
@@ -185,28 +190,64 @@ export class CultivationGame {
     this.socket?.emit('player:dash', { direction }); this.audio?.play('dash');
   }
 
+  selectCombatTarget(range, direction) {
+    const living = [...this.enemies.values()].filter(enemy => enemy.alive !== false && enemy.hp > 0);
+    const locked = living.find(enemy => enemy.id === this.lockedTargetId);
+    if (locked) return locked;
+    if (this.mouse.active) {
+      const hovered = living
+        .map(enemy => ({ enemy, point: this.screen(enemy.position) }))
+        .map(({ enemy, point }) => ({ enemy, distance: Math.hypot(point.x - this.mouse.x, point.y - 18 - this.mouse.y) }))
+        .filter(entry => entry.distance <= 34)
+        .sort((a, b) => a.distance - b.distance)[0]?.enemy;
+      if (hovered) return hovered;
+    }
+    return living
+      .map(enemy => {
+        const dx = enemy.position.x - this.player.position.x, dz = enemy.position.z - this.player.position.z;
+        const distance = Math.hypot(dx, dz);
+        const dot = distance > .001 ? dx / distance * direction.x + dz / distance * direction.z : 1;
+        return { enemy, distance, dot };
+      })
+      .filter(({ distance, dot }) => distance <= range && dot >= .35)
+      .sort((a, b) => (b.dot - a.dot) * 4 + a.distance - b.distance)[0]?.enemy ?? null;
+  }
+
   cast(slot) {
-    if (!this.player.canAct || this.state.paused || this.state.meditation || this.tribulation?.active) return;
+    if (!this.player.canAct || this.state.paused || this.state.meditation || this.state.breakthroughActive) return;
     const equipped = slot === 'basic' ? { archetype: 'basic', manaCost: 0, cooldown: .42 } : this.skillSystem.skillForSlot(slot);
     if (!equipped) return this.toast('Ô kỹ năng trống · nhấn K để gán.', 'warning');
-    if ((this.cooldowns.get(slot) ?? 0) > 0 || this.profile.mp < equipped.manaCost) return;
-    this.profile.mp -= equipped.manaCost; this.cooldowns.set(slot, equipped.cooldown);this.cooldownTotals.set(slot,equipped.cooldown);
+    const castLabel=slot==='basic'?'Đòn đánh thường':`Chiêu ${slot.toUpperCase()}`,remaining=this.cooldowns.get(slot)??0;
+    if(this.pendingCasts.has(slot))return slot==='basic'?false:this.warnCastBlocked(`${slot}:pending`,`${castLabel} đang được thi triển.`);
+    if(remaining>0)return slot==='basic'?false:this.warnCastBlocked(`${slot}:cooldown`,`${castLabel} đang hồi chiêu · còn ${remaining<1?remaining.toFixed(1):Math.ceil(remaining)} giây.`);
+    if(this.profile.mp<equipped.manaCost)return this.warnCastBlocked(`${slot}:mana`,`${castLabel} không đủ linh lực · cần ${Math.ceil(equipped.manaCost)}, hiện có ${Math.floor(this.profile.mp)}.`);
     this.player.action = slot === 'basic' ? 'slash' : 'cast'; this.player.actionTime = 0;
-    const angle = this.mouse.active ? this.player.aimAngle : this.player.facing*Math.PI/4-Math.PI/2; const direction = { x: Math.cos(angle), z: Math.sin(angle) };
+    const rawAngle = this.mouse.active ? this.player.aimAngle : this.player.facing*Math.PI/4-Math.PI/2;
+    let direction = { x: Math.cos(rawAngle), z: Math.sin(rawAngle) };
+    const spec=this.combatSystem.specFor(slot,equipped),combatTarget=this.selectCombatTarget(spec.range,direction);
+    if(combatTarget){const dx=combatTarget.position.x-this.player.position.x,dz=combatTarget.position.z-this.player.position.z,length=Math.hypot(dx,dz)||1;direction={x:dx/length,z:dz/length};}
+    const angle=Math.atan2(direction.z,direction.x);
     this.player.facing=(Math.round((angle+Math.PI/2)/(Math.PI/4))+8)%8;
-    const attack=this.combatSystem.createAttack({slot,skill:equipped,origin:this.player.position,direction}),target=attack.target,sect=getSectCombatData(this.profile.faction),vfxSlot=slot==='basic'?'basic':equipped.archetype??slot;
+    const attack=this.combatSystem.createAttack({slot,skill:equipped,origin:this.player.position,direction}),target=combatTarget?{x:combatTarget.position.x,z:combatTarget.position.z}:attack.target,sect=getSectCombatData(this.profile.faction),vfxSlot=slot==='basic'?'basic':equipped.archetype??slot;
     const commitHit=()=>{
-      this.vfxManager.cast({faction:this.profile.faction,slot:vfxSlot,origin:this.player.position,direction,target,maxRange:attack.range,hitboxWidth:attack.hitboxWidth});
-      if(slot!=='basic')this.effects.push({type:'danger',...target,radius:this.profile.faction==='demonic'?3.6:2.5,life:.3,max:.3,color:sect.primary});
-      if(this.profile.faction==='demonic'&&slot!=='basic')this.player.heal(Math.max(2,(equipped.damage??20)*sect.mechanics.lifeSteal));
-      if(this.profile.faction==='heretic'&&vfxSlot==='r'){this.player.position.x=clamp(this.player.position.x+direction.x*3,-48,48);this.player.position.z=clamp(this.player.position.z+direction.z*3,-48,48);this.state.invulnerableUntil=performance.now()/1000+.3;}
-      this.socket?.emit('combat:ability', { ability: slot, abilityId: slot, direction, aim: direction, position: this.player.position, sectMechanics:sect.mechanics, weaponId:this.shopSystem.equipment.weapon, totalAtk:this.player.totalAtk });
+      const showVfx=(hitIds=[])=>{const confirmed=Boolean(combatTarget&&hitIds.includes(combatTarget.id)),visualTarget=confirmed?target:attack.target,visualRange=confirmed?Math.hypot(target.x-this.player.position.x,target.z-this.player.position.z):attack.range;this.vfxManager.cast({faction:this.profile.faction,slot:vfxSlot,style:equipped.vfx,origin:this.player.position,direction,target:visualTarget,maxRange:visualRange,hitboxWidth:attack.hitboxWidth,confirmedHitIds:hitIds});if(slot!=='basic')this.effects.push({type:'danger',...visualTarget,radius:this.profile.faction==='demonic'?3.6:2.5,life:.3,max:.3,color:sect.primary});};
+      if(!this.socket||!this.state.joined){this.profile.mp-=equipped.manaCost;this.cooldowns.set(slot,equipped.cooldown);this.cooldownTotals.set(slot,equipped.cooldown);showVfx(combatTarget?[combatTarget.id]:[]);return;}
+      this.pendingCasts.add(slot);
+      this.socket.timeout(4000).emit('combat:ability', { ability: slot, skillId:equipped.id, direction, aim: direction, targetId:combatTarget?.id??null, position: this.player.position },(error,response)=>{
+        this.pendingCasts.delete(slot);
+        if(error||response?.ok===false){this.toast(response?.error?.message??'Máy chủ không xác nhận chiêu thức.','warning');return;}
+        showVfx(response?.hitIds??[]);
+        if(response?.player)this.mergeSelf(response.player);
+      });
     };
-    this.animationController.play(slot==='basic'?'attack':'cast',{onMarker:commitHit,onComplete:()=>{if(!this.state.blocking)this.player.action='idle';}},true);
+    // Send immediately. Animation markers are visual-only and can be replaced
+    // by movement/hurt states; tying networking to them caused random lost casts.
+    commitHit();
+    this.animationController.play(slot==='basic'?'attack':'cast',{onComplete:()=>{if(!this.state.blocking)this.player.action='idle';}},true);
   }
 
   toggleMeditation() { if(!this.player.canAct)return;this.state.meditation = !this.state.meditation; this.player.action = this.state.meditation ? 'cast' : 'idle'; this.player.actionTime = 0; this.socket?.emit('cultivation:meditate', { active: this.state.meditation }); }
-  unbindSkill(slot){if(this.skillSystem.unassign(slot)){this.profile.skillSystem=this.skillSystem.serialize();this.onProfileChange?.(this.profile);this.updateUI();this.toast(`Đã gỡ kỹ năng khỏi ${slot.toUpperCase()}`,'info');}}
+  async unbindSkill(slot){if(await this.performSkillAction({action:'remove',slot})){this.updateUI();this.toast(`Đã gỡ kỹ năng khỏi ${slot.toUpperCase()}`,'info');}}
   togglePause(force) { if(force===false)return this.hudManager.close('pause');if(force===true)return this.hudManager.open('pause');return this.hudManager.toggle('pause'); }
   toggleWorldMap() { return this.hudManager.toggle('map'); }
   realmOrder(){return CULTIVATION_REALMS.find(r=>r.id===this.skillSystem.realmId)?.order??0;}
@@ -218,17 +259,20 @@ export class CultivationGame {
   currentRegion(){return REGIONS.find(region=>region.id===this.profile.currentRegion)??REGIONS[0];}
   regionTheme(){return REGION_THEMES[this.profile.currentRegion]??REGION_THEMES.sect_hall;}
   updateRegionUI(){const region=this.currentRegion();const minimapName=document.querySelector('.minimap-heading span');if(minimapName)minimapName.textContent=region.name;document.body.dataset.region=region.id;}
+  cycleTarget(){const living=[...this.enemies.values()].filter(enemy=>enemy.alive!==false).sort((a,b)=>Math.hypot(a.position.x-this.player.position.x,a.position.z-this.player.position.z)-Math.hypot(b.position.x-this.player.position.x,b.position.z-this.player.position.z));if(!living.length){this.lockedTargetId=null;return;}const index=living.findIndex(enemy=>enemy.id===this.lockedTargetId);this.lockedTargetId=living[(index+1)%living.length].id;this.toast(`Khóa mục tiêu: ${this.enemies.get(this.lockedTargetId)?.label??this.lockedTargetId}`,'info');}
+  canRequestBreakthrough(){return Boolean(tribulationGateForLevel(this.cultivationSystem.level)&&this.cultivationSystem.progress>=100&&!this.state.breakthroughActive);}
+  requestBreakthrough(){if(!this.socket||!this.state.joined)return this.toast('Cần kết nối máy chủ để độ kiếp.','warning');this.socket.timeout(4000).emit('breakthrough:start',{},(error,response)=>{if(error||response?.ok===false)return this.toast(response?.error?.message??'Không thể bắt đầu độ kiếp.','warning');if(response?.player)this.mergeSelf(response.player);});}
+  syncBreakthrough(state={}){const active=['active','resolving'].includes(state.status);this.state.breakthroughActive=active;if(active){this.ensureTribulationUI();this.hudManager.open('tribulation');const wave=this.tribulationUI?.querySelector('[data-wave]');if(wave)wave.textContent=`Thiên Lôi ${Math.min(TRIBULATION_WAVES,Math.max(1,state.wave||1))} / ${TRIBULATION_WAVES}`;}else if(this.hudManager.isOpen('tribulation'))this.hudManager.close('tribulation');}
+  performSkillAction({action,id,slot}){return new Promise(resolve=>{if(!this.socket||!this.state.joined){this.toast('Đang kết nối lại máy chủ.','warning');resolve(false);return;}this.socket.timeout(4000).emit('skill:action',{action,skillId:id,slot},(error,response)=>{if(error||response?.ok===false){this.toast(response?.error?.message??'Máy chủ không xác nhận thay đổi kỹ năng.','warning');resolve(false);return;}this.syncSkills(response.skillSystem??response.player?.skillSystem);if(response.shopSystem)this.applyShopSnapshot(response.shopSystem);if(response.player)this.mergeSelf(response.player);resolve(true);});});}
+  updateObjective(){if(!this.ui.objectiveTitle||!this.ui.objectiveText)return;const level=this.cultivationSystem.level,progress=Math.round(this.cultivationSystem.progress),gate=tribulationGateForLevel(level);let title='Tích lũy tu vi',text='Đánh quái hoặc nhấn C trong khu an toàn để tĩnh tọa.';if(gate&&progress>=100){title=`Thiên kiếp ${gate.targetRealmId==='nascent_soul'?'Nguyên Anh':'Hóa Thần'}`;text='Nhấn B hoặc N ở bất kỳ đâu để bắt đầu độ kiếp.';}else if(level>=11){title='Hóa Thần chi lộ';text='Cảnh giới càng cao, EXP nhận được càng giảm và yêu cầu càng lớn.';}else if(level>=7){title='Nguyên Anh tu luyện';text=`Tiến tới Hóa Thần · ${progress}% tầng hiện tại`;}else if(level>=5){title='Kim Đan viên mãn';text=`Tiến tới Nguyên Anh · ${progress}% tầng hiện tại`;}this.ui.objectiveTitle.textContent=title;this.ui.objectiveText.textContent=text;}
+  ensureTouchControls(){if(this.touchControls)return;const el=document.createElement('div');el.className='touch-controls';el.setAttribute('aria-label','Điều khiển cảm ứng');el.innerHTML='<div class="touch-move"><button data-key="KeyW">▲</button><button data-key="KeyA">◀</button><button data-key="KeyS">▼</button><button data-key="KeyD">▶</button></div><div class="touch-actions"><button data-action="basic">⚔</button><button data-action="dash">Lướt</button><button data-hold="block">Đỡ</button><button data-action="q">Q</button><button data-action="e">E</button><button data-action="r">R</button><button data-action="f">F</button><button data-action="g">G</button></div>';this.ui.app?.appendChild(el);this.touchControls=el;el.querySelectorAll('[data-key]').forEach(button=>{const key=button.dataset.key;this.listen(button,'pointerdown',event=>{event.preventDefault();this.keys.add(key);});for(const type of ['pointerup','pointercancel','pointerleave'])this.listen(button,type,()=>this.keys.delete(key));});el.querySelectorAll('[data-action]').forEach(button=>this.listen(button,'pointerdown',event=>{event.preventDefault();const action=button.dataset.action;if(action==='dash')this.dash();else this.cast(action);}));const block=el.querySelector('[data-hold="block"]');this.listen(block,'pointerdown',event=>{event.preventDefault();this.setBlocking(true);});for(const type of ['pointerup','pointercancel','pointerleave'])this.listen(block,type,()=>this.setBlocking(false));}
 
   update(dt) {
     this.state.dashCooldown = Math.max(0, this.state.dashCooldown - dt);
     this.goldDropSystem?.update(dt,this.player.position);
     this.vfxManager?.update(dt);
     this.cooldowns.forEach((value,key)=>{const next=Math.max(0,value-dt);this.cooldowns.set(key,next);if(value>0&&next===0){const button=this.ui.skillbar?.querySelector(`[data-skill="${key}"]`);this.hudManager.pulseSkillReady(button);this.audio?.play('cooldown-ready');}});
-    if(this.state.meditation&&!this.state.joined&&!this.tribulation?.active){
-      this.cultivationTick+=dt;
-      while(this.cultivationTick+Number.EPSILON>=.25){this.gainCultivation(2);this.cultivationTick-=.25;}
-    }
-    const direction = !this.player.canAct || this.state.meditation || this.tribulation?.active || this.state.blocking ? { x: 0, z: 0 } : this.input();
+    const direction = !this.player.canAct || this.state.meditation || this.state.blocking ? { x: 0, z: 0 } : this.input();
     const moving = direction.x || direction.z;
     if (moving) this.player.facing = (Math.round(Math.atan2(direction.x, -direction.z) / (Math.PI / 4)) + 8) % 8;
     if(this.mouse.active&&(this.player.action!=='idle'||!moving))this.player.facing=(Math.round((this.player.aimAngle+Math.PI/2)/(Math.PI/4))+8)%8;
@@ -239,11 +283,13 @@ export class CultivationGame {
     } else {
       const response = moving ? PLAYER_MOTION.acceleration : PLAYER_MOTION.deceleration;
       const t = 1 - Math.exp(-response * dt);
-      this.player.velocity.x = lerp(this.player.velocity.x, direction.x * PLAYER_MOTION.walkSpeed, t);
-      this.player.velocity.z = lerp(this.player.velocity.z, direction.z * PLAYER_MOTION.walkSpeed, t);
+      const movementSpeed=PLAYER_MOTION.walkSpeed;
+      this.player.velocity.x = lerp(this.player.velocity.x, direction.x * movementSpeed, t);
+      this.player.velocity.z = lerp(this.player.velocity.z, direction.z * movementSpeed, t);
     }
     this.player.position.x = clamp(this.player.position.x + this.player.velocity.x * dt, -48, 48);
     this.player.position.z = clamp(this.player.position.z + this.player.velocity.z * dt, -48, 48);
+    this.player.position.y = lerp(this.player.position.y??0,0,1-Math.exp(-8*dt));
     this.player.actionTime += dt;
     if (!this.state.meditation && !this.state.blocking && this.player.action !== 'idle' && this.player.actionTime > .58) this.player.action = 'idle';
     const playerSpeed=Math.hypot(this.player.velocity.x,this.player.velocity.z);
@@ -255,6 +301,10 @@ export class CultivationGame {
       if(enemy.animator.state!==state||enemy.animator.finished&&state!=='death')enemy.animator.play(state,{},state==='hurt'||state==='attack');
       enemy.animator.update(dt);
       enemy.hurt=Math.max(0,(enemy.hurt??0)-dt);
+      const smooth=1-Math.exp(-14*dt);
+      enemy.position.x=lerp(enemy.position.x,enemy.target?.x??enemy.position.x,smooth);
+      enemy.position.y=lerp(enemy.position.y,enemy.target?.y??enemy.position.y,smooth);
+      enemy.position.z=lerp(enemy.position.z,enemy.target?.z??enemy.position.z,smooth);
     }
     const cameraT = 1 - Math.exp(-PLAYER_MOTION.cameraSharpness * dt);
     this.camera.x = lerp(this.camera.x, this.player.position.x, cameraT); this.camera.z = lerp(this.camera.z, this.player.position.z, cameraT);
@@ -263,43 +313,53 @@ export class CultivationGame {
     for(let i=this.damageNumbers.length-1;i>=0;i--){this.damageNumbers[i].life-=dt;this.damageNumbers[i].z-=dt*.55;if(this.damageNumbers[i].life<=0)this.damageNumbers.splice(i,1);}
     this.netTime += dt; if (this.netTime >= 1 / 20) { this.netTime = 0; if(this.player.canAct)this.socket?.emit('player:move', { position: this.player.position, yaw: this.player.facing * Math.PI / 4, velocity: this.player.velocity, meditating: this.state.meditation, sequence: Date.now() }); }
     const boss=[...this.enemies.values()].find(e=>e.isBoss&&e.alive!==false);if(boss){const pixels=Math.hypot((boss.position.x-this.player.position.x)*18,(boss.position.z-this.player.position.z)*12);const combat=performance.now()<this.bossCombatUntil||boss.isAttacking||boss.tookDamageRecently;if(pixels<250||combat)this.bossEngaged=true;if(pixels>300&&!combat)this.bossEngaged=false;}
-    this.updateTribulation(dt);this.updateHudVisibility();
+    this.updateHudVisibility();
   }
 
   snapshot(data = {}) {
     const ownId = this.socket?.id;
     for (const player of data.players ?? []) { if (player.id === ownId) this.mergeSelf(player); else this.remotePlayers.set(player.id, { ...player, target: pos(player.position) }); }
-    const seen = new Set(); for (const enemy of data.enemies ?? []) { seen.add(enemy.id); const old=this.enemies.get(enemy.id),nextPosition=pos(enemy.position),moveSpeed=old?Math.hypot(nextPosition.x-old.position.x,nextPosition.z-old.position.z):0,animator=old?.animator??new AnimationController(MONSTER_ANIMATION_CLIPS);if(old?.alive===false&&enemy.alive!==false)animator.play('idle',{},true);const monster=old instanceof Monster?old:new Monster(enemy,animator),hurt=old&&enemy.hp<old.hp ? .28 : Math.max(0,(old?.hurt??0)-.05);monster.sync({...enemy,position:nextPosition,target:nextPosition,moveSpeed,hurt},performance.now(),Date.now());monster.animator=animator;this.enemies.set(enemy.id,monster); }
+    const seen = new Set(); for (const enemy of data.enemies ?? []) { if(enemy.regionId&&enemy.regionId!==this.profile.currentRegion)continue;seen.add(enemy.id);const old=this.enemies.get(enemy.id),nextPosition=pos(enemy.position),displayPosition=old?.position??nextPosition,moveSpeed=old?Math.hypot(nextPosition.x-(old.target?.x??old.position.x),nextPosition.z-(old.target?.z??old.position.z)):0,animator=old?.animator??new AnimationController(MONSTER_ANIMATION_CLIPS);if(old?.alive===false&&enemy.alive!==false)animator.play('idle',{},true);const monster=old instanceof Monster?old:new Monster({...enemy,position:displayPosition,target:nextPosition},animator),hurt=old&&enemy.hp<old.hp ? .28 : Math.max(0,(old?.hurt??0)-.05);monster.sync({...enemy,position:displayPosition,target:nextPosition,moveSpeed,hurt},performance.now(),Date.now());monster.animator=animator;this.enemies.set(enemy.id,monster); }
     for (const id of this.enemies.keys()) if (!seen.has(id)) this.enemies.delete(id);
     if (this.ui.onlineCount) this.ui.onlineCount.textContent = String(data.players?.length ?? 1);
   }
   syncServerGold(data={}){
     if(!Number.isFinite(Number(data.gold)))return;
     const before=this.shopSystem.gold;
-    this.shopSystem.gold=Math.max(0,Number(data.gold));
+    this.shopSystem.gold=Math.max(0,Number(data.gold));this.skillSystem.availableGold=this.shopSystem.gold;
     this.profile.gold=this.shopSystem.gold;this.profile.shopSystem=this.shopSystem.serialize();
     this.uiManager.updateGold(this.shopSystem.gold,this.ui.goldCount,this.shopUI?.querySelector('[data-shop-gold]'),this.inventoryUI?.querySelector('[data-inventory-gold]'));
     const now=performance.now();if(before!==this.shopSystem.gold&&now-(this.lastGoldPersistAt??0)>750){this.lastGoldPersistAt=now;this.onProfileChange?.(this.profile);}
   }
+
+  warnCastBlocked(key,message){const now=performance.now(),last=this.castWarningTimes.get(key)??-Infinity;if(now-last<750)return false;this.castWarningTimes.set(key,now);this.toast(message,'warning');return false;}
+  renderGold(){this.uiManager.updateGold(this.shopSystem.gold,this.ui.goldCount,this.shopUI?.querySelector('[data-shop-gold]'),this.inventoryUI?.querySelector('[data-inventory-gold]'));}
   syncCultivation(state,forcePersist=false){
     if(!state)return;
     const beforeLevel=this.cultivationSystem.level,beforeExp=this.cultivationSystem.currentExp;
     this.cultivationSystem.sync(state);
-    const pointAwards=this.skillSystem.applyCultivationLevel(this.cultivationSystem.level);this.skillSystem.cultivationProgress=this.cultivationSystem.progress;
+    const pointAwards=this.skillSystem.applyCultivationLevel(this.cultivationSystem.level);this.skillSystem.cultivationProgress=this.cultivationSystem.progress;this.mapManager?.setRealmOrder(this.realmOrder());
     this.profile.realm=this.cultivationSystem.realmId;this.profile.realmName=this.cultivationSystem.displayName;this.profile.minorLevel=this.cultivationSystem.subStage;this.profile.qi=this.cultivationSystem.currentExp;this.profile.cultivationSystem=this.cultivationSystem.serialize();this.profile.skillSystem=this.skillSystem.serialize();
     if(this.cultivationSystem.level>beforeLevel){this.goldBurst();this.toast(`${this.cultivationSystem.displayName} · Level ${this.cultivationSystem.level}`,'legendary');if(pointAwards.unlockAwarded)this.toast(`+${pointAwards.unlockAwarded} Điểm Mở Khóa Chiêu`,'realm');if(pointAwards.upgradeAwarded)this.toast(`+${pointAwards.upgradeAwarded} Điểm Nâng Cấp Chiêu`,'success');}
     const now=performance.now();if(forcePersist||beforeExp!==this.cultivationSystem.currentExp&&(now-(this.lastProgressPersistAt??0)>750)){this.lastProgressPersistAt=now;this.onProfileChange?.(this.profile);}
   }
+  syncSkills(state){if(!state)return;this.skillSystem.restore(state);this.profile.skillSystem=this.skillSystem.serialize();this.skillTreePanel?.render();}
+  syncCooldowns(state={}){for(const [rawKey,remainingMs] of Object.entries(state)){const key=rawKey==='basic'?'basic':rawKey.toLowerCase();const remaining=Math.max(0,Number(remainingMs)||0)/1000;this.cooldowns.set(key,remaining);this.cooldownTotals.set(key,Math.max(this.cooldownTotals.get(key)??0,remaining));}if(Number.isFinite(Number(state.dash)))this.state.dashCooldown=Math.max(0,Number(state.dash)/1000);}
   applyShopSnapshot(shop){
     if(!shop)return;this.shopSystem.gold=Math.max(0,Number(shop.gold)||0);this.shopSystem.inventory=[...(shop.inventory??[])].filter(id=>itemById(id));this.shopSystem.equipment={weapon:null,armor:null,accessory:null,...shop.equipment};this.shopSystem.equipped=this.shopSystem.equipment.weapon;this.itemSystem.syncEquipment();this.profile.shopSystem=this.shopSystem.serialize();this.profile.gold=this.shopSystem.gold;this.syncServerGold(shop);this.renderShop();this.renderInventory();this.onProfileChange?.(this.profile);
   }
   mergeSelf(data = {}) {
     const oldHp=this.player.hp,nextHp=Number(data.hp??oldHp);this.profile.maxHp=Number(data.maxHp??this.profile.maxHp);this.profile.maxMp=Number(data.maxMp??this.profile.maxMp);this.profile.mp=Number(data.mp??this.profile.mp);this.profile.qi=Number(data.qi??this.profile.qi);
-    this.syncServerGold(data);this.syncCultivation(data.cultivationSystem);if(data.shopSystem)this.applyShopSnapshot(data.shopSystem);else if(data.equipment){this.shopSystem.equipment={...this.shopSystem.equipment,...data.equipment};this.itemSystem.syncEquipment();}
+    if(Number.isFinite(Number(data.baseAtk)))this.player.baseAtk=Number(data.baseAtk);
+    if(Number.isFinite(Number(data.totalAtk)))this.player.totalAtk=Number(data.totalAtk);
+    this.syncServerGold(data);this.syncCultivation(data.cultivationSystem);this.syncSkills(data.skillSystem);this.syncCooldowns(data.cooldowns);if(data.shopSystem)this.applyShopSnapshot(data.shopSystem);else if(data.equipment){this.shopSystem.equipment={...this.shopSystem.equipment,...data.equipment};this.itemSystem.syncEquipment();}
+    if(data.resources||data.inventory&&!Array.isArray(data.inventory))this.profile.resources={...this.profile.resources,...(data.resources??data.inventory)};
+    if(data.currentRegion&&REGIONS.some(region=>region.id===data.currentRegion)){this.profile.currentRegion=data.currentRegion;this.mapManager.currentRegion=data.currentRegion;this.mapManager.updateMarker();this.updateRegionUI();}
+    if(data.breakthrough)this.syncBreakthrough(data.breakthrough);
     this.player.hp=nextHp;if(nextHp<oldHp){if(this.state.blocking)this.blockImpact();else this.receivePlayerDamage(oldHp-nextHp,nextHp);}
     if(data.alive===false)this.handlePlayerDeath({cultivationSystem:data.cultivationSystem});
     if(data.alive===true&&this.player.isDead)this.finishRespawn(data);
-    if(data.position&&this.state.dashTime<=0){const p=pos(data.position);this.player.position.x=lerp(this.player.position.x,p.x,.18);this.player.position.z=lerp(this.player.position.z,p.z,.18);}
+    if(data.position&&this.state.dashTime<=0){const p=pos(data.position);this.player.position.x=lerp(this.player.position.x,p.x,.18);this.player.position.y=lerp(this.player.position.y??0,p.y,.18);this.player.position.z=lerp(this.player.position.z,p.z,.18);}
   }
   worldEvent(event = {}) {
     if(event.type==='enemy:damaged'){const enemy=this.enemies.get(event.enemyId);if(enemy){enemy.hurt=.34;if(enemy.isBoss){this.bossEngaged=true;this.bossCombatUntil=performance.now()+4500;enemy.tookDamageRecently=true;setTimeout(()=>{enemy.tookDamageRecently=false;},4500);}this.damageNumbers.push({x:enemy.position.x,z:enemy.position.z,value:Math.round(event.damage??0),life:.85,max:.85});}}
@@ -308,7 +368,13 @@ export class CultivationGame {
     if(event.type==='player:blocked'&&event.playerId===this.socket?.id)this.blockImpact();if(event.type==='player:parried'&&event.playerId===this.socket?.id)this.blockImpact(true);
     if(event.type==='player:defeated'&&event.playerId===this.socket?.id)this.handlePlayerDeath(event);
     if(event.type==='player:respawned'&&event.playerId===this.socket?.id)this.finishRespawn(event);
-    if(event.type==='loot:granted'&&event.playerId===this.socket?.id){if(event.loot?.cultivationSystem)this.syncCultivation(event.loot.cultivationSystem,true);const exp=Number(event.loot?.exp??event.loot?.qi)||0;if(exp>0){this.spawnExpPickup(exp);this.toast(`+${Math.round(exp)} EXP Tu Vi`,'success');}if(event.loot?.gold)this.toast(`+${event.loot.gold} Vàng`,'legendary');}
+    if(event.type==='loot:granted'&&event.playerId===this.socket?.id){if(Number.isFinite(Number(event.loot?.totalGold)))this.syncServerGold({gold:event.loot.totalGold});if(event.loot?.cultivationSystem)this.syncCultivation(event.loot.cultivationSystem,true);if(event.loot?.skillSystem)this.syncSkills(event.loot.skillSystem);const exp=Number(event.loot?.exp??event.loot?.qi)||0;if(exp>0){this.spawnExpPickup(exp);this.toast(`+${Math.round(exp)} EXP Tu Vi`,'success');}if(event.loot?.skillUpgradePoints)this.toast('+1 Điểm Nâng Cấp Chiêu (rơi hiếm)','legendary');}
+    if(event.type==='loot:granted'&&event.playerId===this.socket?.id){for(const key of ['linhThach','linhThao','linhCot','hoTamDan'])if(Number(event.loot?.[key]))this.profile.resources[key]=(this.profile.resources[key]??0)+Number(event.loot[key]);this.onProfileChange?.(this.profile);}
+    if(event.type==='breakthrough:started'&&event.playerId===this.socket?.id){this.syncBreakthrough({status:'active',wave:0});this.toast('Thiên kiếp bắt đầu · hãy né khỏi vùng sét!','realm');}
+    if(event.type==='breakthrough:telegraph'&&event.playerId===this.socket?.id){const life=Math.max(.2,((event.resolveAt??Date.now()+900)-Date.now())/1000);this.effects.push({type:'danger',...pos(event.position),radius:event.radius,life,max:life,color:'#d9c4ff'});this.syncBreakthrough({status:'active',wave:event.wave});}
+    if(event.type==='breakthrough:strike'&&event.playerId===this.socket?.id){this.effects.push({type:'lightning',...pos(event.position),life:.65,max:.65,color:event.hit?'#ff6b78':'#fff0a0'});}
+    if(event.type==='breakthrough:success'&&event.playerId===this.socket?.id){if(event.cultivationSystem)this.syncCultivation(event.cultivationSystem,true);if(event.skillSystem)this.syncSkills(event.skillSystem);this.syncBreakthrough({status:'idle',wave:TRIBULATION_WAVES});this.goldBurst();const realm=event.targetRealmId==='spirit_transformation'?'Hóa Thần':'Nguyên Anh';this.toast(`Đột phá ${realm} thành công!`,'legendary');this.onProfileChange?.(this.profile);}
+    if(event.type==='breakthrough:failed'&&event.playerId===this.socket?.id){this.syncBreakthrough({status:'failed',wave:event.wave});this.toast('Độ kiếp thất bại · hãy hồi phục và thử lại.','error');}
   }
   blockImpact(parry=false){const a=this.player.aimAngle;for(let i=0;i<10;i++)this.effects.push({type:'spark',x:this.player.position.x+Math.cos(a),z:this.player.position.z+Math.sin(a),dx:Math.cos(a)+(Math.random()-.5),dz:Math.sin(a)+(Math.random()-.5),life:.3,max:.3,color:parry?'#fff2a0':'#bff6ff'});this.audio?.play('block');}
 
@@ -318,36 +384,32 @@ export class CultivationGame {
   respawnAtHall(){return new Promise((resolve,reject)=>{if(!this.socket){this.finishRespawn({position:{x:0,y:0,z:26},hp:this.player.maxHp,mp:this.profile.maxMp,alive:true});resolve();return;}this.socket.emit('player:respawn',{},response=>{if(response?.ok===false){this.toast(response?.error?.message??'Không thể hồi sinh.','error');reject(new Error(response?.error?.message));return;}this.finishRespawn(response?.player??{});resolve(response?.player);});});}
   finishRespawn(data={}){this.player.respawn({hp:Number(data.hp??this.player.maxHp),mp:Number(data.mp??this.profile.maxMp),position:data.position?pos(data.position):undefined});this.profile.mp=this.profile.maxMp;this.state.meditation=false;this.state.blocking=false;this.state.invulnerableUntil=performance.now()/1000+1.5;this.uiManager.hideDeathDialog();this.animationController.play('idle',{},true);if(data.position){const p=pos(data.position);this.player.position={...this.player.position,...p};this.camera.x=p.x;this.camera.z=p.z;}this.updateUI();}
 
-  gainCultivation(amount){const result=this.cultivationSystem.addEXP(amount);if(!result.gained)return;const color=COLORS[this.profile.faction].aura;for(let i=0;i<5;i++)this.effects.push({type:'spirit',x:this.player.position.x+(Math.random()-.5)*1.5,z:this.player.position.z+(Math.random()-.5)*1.5,life:.7+Math.random()*.35,max:1,color});if(result.levels){const awards=this.skillSystem.applyCultivationLevel(this.cultivationSystem.level);this.goldBurst();this.toast(`${this.cultivationSystem.displayName} · Level ${this.cultivationSystem.level}`,'legendary');if(awards.unlockAwarded)this.toast(`+${awards.unlockAwarded} Điểm Mở Khóa Chiêu`,'realm');if(awards.upgradeAwarded)this.toast(`+${awards.upgradeAwarded} Điểm Nâng Cấp Chiêu`,'success');for(const realm of result.breakthroughs)this.toast(`Đột phá ${CULTIVATION_REALMS.find(r=>r.id===realm.to)?.name??realm.to} thành công`,'realm');this.mapManager?.setRealmOrder(this.realmOrder());}this.skillSystem.cultivationProgress=this.cultivationSystem.progress;this.profile.realm=this.cultivationSystem.realmId;this.profile.realmName=this.cultivationSystem.displayName;this.profile.minorLevel=this.cultivationSystem.subStage;this.profile.qi=this.cultivationSystem.currentExp;this.profile.cultivationSystem=this.cultivationSystem.serialize();this.profile.skillSystem=this.skillSystem.serialize();this.onProfileChange?.(this.profile);}
   goldBurst(){for(let i=0;i<18;i++){const a=i/18*Math.PI*2;this.effects.push({type:'burst',x:this.player.position.x,z:this.player.position.z,dx:Math.cos(a),dz:Math.sin(a),life:.8,max:.8,color:'#ffd86a'});}}
   spawnGoldPickup(amount){this.damageNumbers.push({x:this.player.position.x,z:this.player.position.z,value:`+${amount} Vàng`,gold:true,life:1.2,max:1.2});for(let i=0;i<7;i++)this.effects.push({type:'spark',x:this.player.position.x+(Math.random()-.5),z:this.player.position.z+(Math.random()-.5),dx:(Math.random()-.5)*.7,dz:-.4-Math.random(),life:.65,max:.65,color:'#ffd34f'});const popup=document.createElement('div');popup.className='gold-loot-popup';popup.innerHTML=`<i>🪙</i><strong>+${amount} Vàng</strong>`;this.ui.hud?.appendChild(popup);requestAnimationFrame(()=>popup.classList.add('is-visible'));setTimeout(()=>popup.remove(),1400);}
   spawnExpPickup(amount){this.damageNumbers.push({x:this.player.position.x,z:this.player.position.z,value:`+${Math.round(amount)} EXP`,exp:true,life:1.2,max:1.2});for(let i=0;i<5;i++)this.effects.push({type:'spirit',x:this.player.position.x+(Math.random()-.5),z:this.player.position.z+(Math.random()-.5),life:.7+Math.random()*.25,max:1,color:'#72eaff'});}
   dropGoldFromEvent(amount,event){const enemy=this.enemies.get(event?.enemyId),position=enemy?.position??this.player.position;this.goldDropSystem.spawnGoldLoot(position.x,position.z,amount,{boss:Boolean(enemy?.isBoss)});}
   collectGold(amount){this.spawnGoldPickup(amount);this.syncServerGold({gold:this.shopSystem.gold});}
-  beginTribulation(){if(this.tribulation?.active)return;this.state.meditation=false;this.tribulation={active:true,round:1,time:0,hits:0};this.ensureTribulationUI();this.hudManager.open('tribulation');this.toast('ĐỘ KIẾP · Nhấn SPACE khi vòng sáng hội tụ!','realm');}
-  ensureTribulationUI(){if(this.tribulationUI)return;const el=document.createElement('section');el.className='screen-overlay tribulation-overlay';el.hidden=true;el.innerHTML='<div class="tribulation-card"><small>THIÊN ĐẠO GIÁNG LÂM</small><h2>Độ Kiếp</h2><div class="tribulation-timing"><i></i><b></b></div><p>Sấm sét hội tụ — nhấn <kbd>SPACE</kbd> khi vạch sáng đi qua vùng vàng.</p><strong data-wave>Thiên Lôi 1 / 3</strong></div>';this.ui.app.appendChild(el);this.tribulationUI=el;this.hudManager.register('tribulation',el);}
-  updateTribulation(dt){const t=this.tribulation;if(!t?.active)return;t.time+=dt;const phase=(t.time%1.6)/1.6;const marker=this.tribulationUI?.querySelector('.tribulation-timing b');if(marker)marker.style.left=`${phase*100}%`;if(t.time>=t.round*1.6){this.profile.hp=Math.max(1,this.profile.hp-18);this.advanceTribulationRound(false);}}
-  resolveTribulationInput(){const phase=(this.tribulation.time%1.6)/1.6;const success=phase>=.62&&phase<=.82;if(!success)this.profile.hp=Math.max(1,this.profile.hp-12);this.advanceTribulationRound(success);}
-  advanceTribulationRound(success){const t=this.tribulation;if(!t?.active)return;const p={x:this.player.position.x,z:this.player.position.z};this.effects.push({type:'lightning',...p,life:.65,max:.65,color:success?'#fff0a0':'#d9c4ff'});t.round+=1;t.time=(t.round-1)*1.6;if(t.round>3){this.completeTribulation();return;}const wave=this.tribulationUI?.querySelector('[data-wave]');if(wave)wave.textContent=`Thiên Lôi ${t.round} / 3`;}
-  completeTribulation(){const current=CULTIVATION_REALMS.find(r=>r.id===this.skillSystem.realmId);const next=CULTIVATION_REALMS.find(r=>r.order===current.order+1);const success=next&&this.skillSystem.breakthrough(next.id);this.tribulation.active=false;this.hudManager.close('tribulation');if(success){this.profile.realm=next.id;this.profile.realmName=`${next.name} Cấp 1`;this.profile.skillSystem=this.skillSystem.serialize();this.goldBurst();this.toast(`${next.name} · Đột phá thành công · +1 Điểm Mở Khóa`,'legendary');this.onProfileChange?.(this.profile);}}
+  ensureTribulationUI(){if(this.tribulationUI)return;const el=document.createElement('section');el.className='screen-overlay tribulation-overlay';el.hidden=true;el.innerHTML=`<div class="tribulation-card"><small>THIÊN ĐẠO GIÁNG LÂM</small><h2>Độ Kiếp</h2><div class="tribulation-timing"><i></i><b></b></div><p>Quan sát vùng sét và dùng WASD hoặc Space để né. Chỉ cần vượt qua ${TRIBULATION_WAVES} đợt.</p><strong data-wave>Thiên Lôi 1 / ${TRIBULATION_WAVES}</strong></div>`;this.ui.app.appendChild(el);this.tribulationUI=el;this.hudManager.register('tribulation',el);}
   updateHudVisibility(){const panel=document.querySelector('.player-panel');panel?.classList.remove('is-collapsed');this.ui.hud?.removeAttribute('hidden');this.ui.hud?.classList.add('is-visible');if(this.ui.goldCount)this.ui.goldCount.textContent=Math.floor(this.shopSystem.gold);this.profile.realmName=this.cultivationSystem.displayName;if(this.ui.realmName)this.ui.realmName.textContent=this.profile.realmName;}
 
   ensureGoldCounter(){const details=document.querySelector('.player-panel .player-details');if(!details||document.getElementById('gold-count'))return;const el=document.createElement('div');el.className='gold-counter';el.innerHTML='🪙 <b id="gold-count">0</b> <span>Vàng</span>';details.appendChild(el);this.ui.goldCount=el.querySelector('b');}
   ensureAttackStat(){const tags=document.querySelector('.player-panel .player-tags');if(!tags||document.getElementById('attack-power'))return;const el=document.createElement('span');el.className='attack-power-tag';el.innerHTML='Công <b id="attack-power">0</b>';tags.appendChild(el);this.ui.attackPower=el.querySelector('b');}
-  performItemAction(action,id){return new Promise(resolve=>{const finish=response=>{if(response?.ok===false){this.toast(response?.error?.message??'Vật phẩm không thể sử dụng.','warning');resolve(false);return;}if(response?.shopSystem)this.applyShopSnapshot(response.shopSystem);if(response?.player)this.mergeSelf(response.player);this.updateUI();resolve(true);};if(this.socket&&this.state.joined){this.socket.timeout(4000).emit('shop:action',{action,itemId:id},(error,response)=>{if(error)return finish({ok:false,error:{message:'Máy chủ cửa hàng không phản hồi. Hãy tải lại game.'}});finish(response);});return;}if(this.socket&&!this.state.joined){finish({ok:false,error:{message:'Đang kết nối lại máy chủ, hãy thử lại sau giây lát.'}});return;}let ok=false;if(action==='buy')ok=this.shopSystem.buy(id,this.realmOrder());if(action==='sell')ok=this.shopSystem.sell(id);if(action==='equip')ok=itemById(id)?.category==='weapons'?this.itemSystem.equipWeapon(id):this.shopSystem.equip(id);if(action==='use')ok=this.itemSystem.useItem(id);if(ok)this.persistEconomy();finish({ok});});}
+  performItemAction(action,id){return new Promise(resolve=>{const finish=response=>{if(response?.ok===false){this.toast(response?.error?.message??'Vật phẩm không thể sử dụng.','warning');resolve(false);return;}if(response?.shopSystem)this.applyShopSnapshot(response.shopSystem);if(response?.player)this.mergeSelf(response.player);this.updateUI();resolve(true);};if(this.socket&&this.state.joined){this.socket.timeout(4000).emit('shop:action',{action,itemId:id},(error,response)=>{if(error)return finish({ok:false,error:{message:'Máy chủ cửa hàng không phản hồi. Hãy tải lại game.'}});finish(response);});return;}if(this.socket&&!this.state.joined){finish({ok:false,error:{message:'Đang kết nối lại máy chủ, hãy thử lại sau giây lát.'}});return;}let ok=false;if(action==='buy')ok=this.shopSystem.buy(id,this.realmOrder(),this.profile.faction);if(action==='sell')ok=this.shopSystem.sell(id);if(action==='equip')ok=itemById(id)?.category==='weapons'?this.itemSystem.equipWeapon(id):this.shopSystem.equip(id,this.profile.faction);if(action==='unequip')ok=this.shopSystem.unequip(id);if(action==='use')ok=this.itemSystem.useItem(id);if(ok)this.persistEconomy();finish({ok});});}
   persistEconomy(){this.itemSystem?.syncEquipment();this.profile.shopSystem=this.shopSystem.serialize();this.profile.gold=this.shopSystem.gold;this.profile.baseAtk=this.player.baseAtk;this.profile.totalAtk=this.player.totalAtk;this.profile.cultivationSystem=this.cultivationSystem.serialize();this.profile.currentRegion=this.mapManager?.currentRegion??this.profile.currentRegion;this.onProfileChange?.(this.profile);this.updateUI();this.renderShop();this.renderInventory();}
   ensureShopUI(){if(this.shopUI)return;this.shopCategory='weapons';const el=document.createElement('section');el.className='screen-overlay shop-overlay';el.hidden=true;el.innerHTML='<div class="shop-card"><header><div><small>THƯƠNG NHÂN LINH KHÍ</small><h2>Vạn Bảo Các</h2></div><button class="modal-close" data-close aria-label="Đóng"><kbd>Esc</kbd> ×</button></header><div class="shop-toolbar"><div class="shop-balance">🪙 <b data-shop-gold>0</b> Vàng</div><nav class="shop-tabs"><button data-shop-tab="weapons">⚔ Vũ Khí</button><button data-shop-tab="armor">🛡 Giáp</button><button data-shop-tab="consumables">丹 Đan Dược</button></nav></div><div class="shop-grid"></div><p class="shop-hint">Nhấn <kbd>P</kbd> để đóng · Vật phẩm bán lại nhận 55% giá.</p></div>';this.ui.app.appendChild(el);this.shopUI=el;this.hudManager.register('shop',el);el.querySelector('[data-close]').onclick=()=>this.hudManager.close('shop');el.onclick=e=>{const tab=e.target.closest('[data-shop-tab]');if(tab){this.shopCategory=tab.dataset.shopTab;this.renderShop();return;}const b=e.target.closest('[data-shop-action]');if(!b)return;const action=b.dataset.shopAction,id=b.dataset.weapon;b.disabled=true;this.performItemAction(action,id).then(ok=>{b.disabled=false;if(ok)this.toast(action==='buy'?'Mua vật phẩm thành công':action==='sell'?'Đã bán vật phẩm':'Đã trang bị','success');});};this.renderShop();}
-  renderShop(){if(!this.shopUI)return;const gold=this.shopUI.querySelector('[data-shop-gold]');if(gold)gold.textContent=Math.floor(this.shopSystem.gold);this.shopUI.querySelectorAll('[data-shop-tab]').forEach(b=>b.classList.toggle('is-active',b.dataset.shopTab===this.shopCategory));const grid=this.shopUI.querySelector('.shop-grid');if(!grid)return;grid.innerHTML=SHOP_ITEMS.filter(item=>item.category===this.shopCategory).map(item=>{const owned=this.shopSystem.inventory.includes(item.id),equipped=Object.values(this.shopSystem.equipment).includes(item.id),locked=this.realmOrder()<item.requiredOrder;const stats=[item.damage&&`⚔ +${item.damage}`,item.defense&&`🛡 +${item.defense}`,item.attackSpeed&&`⚡ +${Math.round(item.attackSpeed*100)}%`,item.heal&&`HP +${item.heal}`,item.mana&&`MP +${item.mana}`].filter(Boolean).join(' · ');return `<article class="shop-item ${locked?'is-locked':''}"><span class="shop-item-icon">${item.icon}</span><span class="shop-tier">Bậc ${item.tier}</span><h3>${item.name}</h3><p>${stats}</p><p>${item.description}</p><small>${locked?'🔒 Cần '+item.requiredRealm:'Yêu cầu đã đạt'}</small><strong>🪙 ${item.price}</strong>${owned&&item.category!=='consumables'?`<div><button data-shop-action="equip" data-weapon="${item.id}" ${equipped?'disabled':''}>${equipped?'Đang dùng':'Trang bị'}</button><button data-shop-action="sell" data-weapon="${item.id}">Bán ${Math.floor(item.price*.55)}</button></div>`:`<button data-shop-action="buy" data-weapon="${item.id}" ${locked?'disabled':''}>Mua</button>`}</article>`;}).join('');}
+  renderShop(){if(!this.shopUI)return;const gold=this.shopUI.querySelector('[data-shop-gold]');if(gold)gold.textContent=Math.floor(this.shopSystem.gold);this.shopUI.querySelectorAll('[data-shop-tab]').forEach(b=>b.classList.toggle('is-active',b.dataset.shopTab===this.shopCategory));const grid=this.shopUI.querySelector('.shop-grid');if(!grid)return;grid.innerHTML=SHOP_ITEMS.filter(item=>item.category===this.shopCategory&&(!item.faction||item.faction===this.profile.faction)).sort((a,b)=>a.tier-b.tier||a.price-b.price).map(item=>{item=itemForFaction(item,this.profile.faction);const owned=this.shopSystem.inventory.includes(item.id),equipped=Object.values(this.shopSystem.equipment).includes(item.id),locked=this.realmOrder()<item.requiredOrder;const stats=[(item.damage??item.atkBonus)&&`⚔ Công +${item.damage??item.atkBonus}`,item.defense&&`🛡 Thủ +${item.defense}`,item.maxMana&&`Linh lực +${item.maxMana}`,item.attackSpeed&&`Tốc đánh +${Math.round(item.attackSpeed*100)}%`,item.critRate&&`Bạo kích +${Math.round(item.critRate*100)}%`,item.lifeSteal&&`Hút máu +${Math.round(item.lifeSteal*100)}%`,item.heal&&`HP +${item.heal}`,item.mana&&`MP +${item.mana}`].filter(Boolean).join(' · '),visual=item.asset?`<img class="equipment-art" src="${item.asset}" alt="${item.name}">`:`<span class="shop-item-icon">${item.icon}</span>`;return `<article class="shop-item ${locked?'is-locked':''}">${visual}<span class="shop-tier">Bậc ${item.tier}</span><h3>${item.name}</h3><p>${stats}</p><p>${item.description}</p><small>${locked?'🔒 Cần '+item.requiredRealm:'Yêu cầu đã đạt'}</small><strong>🪙 ${item.price}</strong>${owned&&item.category!=='consumables'?`<div><button data-shop-action="${equipped?'unequip':'equip'}" data-weapon="${item.id}">${equipped?'Tháo ra':'Trang bị'}</button><button data-shop-action="sell" data-weapon="${item.id}">Bán ${Math.floor(item.price*.55)}</button></div>`:`<button data-shop-action="buy" data-weapon="${item.id}" ${locked?'disabled':''}>Mua</button>`}</article>`;}).join('');}
   toggleShop(){this.renderShop();return this.hudManager.toggle('shop');}
-  ensureInventoryUI(){if(this.inventoryUI)return;const el=document.createElement('section');el.className='screen-overlay inventory-overlay';el.hidden=true;el.innerHTML='<div class="inventory-card"><header><div><small>HÀNH TRANG TU SĨ</small><h2>Túi Đồ</h2></div><button class="modal-close" data-close><kbd>Esc</kbd> ×</button></header><div class="inventory-layout"><aside><h3>Trang Bị</h3><div class="equipment-slots"></div><div class="inventory-gold">🪙 <b data-inventory-gold>0</b> Vàng</div></aside><main><div class="inventory-grid"></div></main></div><div class="item-tooltip" hidden></div><p class="inventory-hint">Chuột phải: trang bị hoặc sử dụng · Rê chuột để xem thuộc tính</p></div>';this.ui.app.appendChild(el);this.inventoryUI=el;this.hudManager.register('inventory',el);el.querySelector('[data-close]').onclick=()=>this.hudManager.close('inventory');el.addEventListener('contextmenu',e=>{const slot=e.target.closest('[data-item-id]');if(!slot)return;e.preventDefault();const id=slot.dataset.itemId,item=itemById(id),action=item?.category==='consumables'&&!item.accessory?'use':'equip';this.performItemAction(action,id).then(ok=>{if(ok)this.toast(action==='use'?'Đã sử dụng vật phẩm':'Đã trang bị','success');});});el.addEventListener('mouseover',e=>{const slot=e.target.closest('[data-item-id]');if(!slot)return;this.showItemTooltip(slot.dataset.itemId,e);});el.addEventListener('mousemove',e=>this.positionItemTooltip(e));el.addEventListener('mouseout',e=>{if(e.target.closest('[data-item-id]'))this.inventoryUI.querySelector('.item-tooltip').hidden=true;});this.renderInventory();}
-  renderInventory(){if(!this.inventoryUI)return;const gold=this.inventoryUI.querySelector('[data-inventory-gold]');if(gold)gold.textContent=Math.floor(this.shopSystem.gold);const labels={weapon:'Vũ Khí',armor:'Giáp',accessory:'Phụ Kiện'};this.inventoryUI.querySelector('.equipment-slots').innerHTML=Object.entries(labels).map(([slot,label])=>{const id=this.shopSystem.equipment[slot],item=itemById(id);return `<div class="equipment-slot ${item?'has-item':''}" ${item?`data-item-id="${item.id}"`:''}><small>${label}</small><i>${item?.icon??'◇'}</i><strong>${item?.name??'Trống'}</strong></div>`;}).join('');const entries=this.shopSystem.inventory;this.inventoryUI.querySelector('.inventory-grid').innerHTML=Array.from({length:30},(_,index)=>{const id=entries[index],item=itemById(id);return `<div class="inventory-slot ${item?'has-item':''}" ${item?`data-item-id="${id}"`:''}>${item?`<i>${item.icon}</i><span>${item.name}</span><b>III</b>`:'<i>·</i>'}</div>`;}).join('');}
-  showItemTooltip(id,event){const item=itemById(id),tip=this.inventoryUI.querySelector('.item-tooltip');if(!item||!tip)return;const stats=Object.entries(item).filter(([key,value])=>['damage','defense','attackSpeed','critRate','lifeSteal','heal','mana','maxMana'].includes(key)&&value).map(([key,value])=>`<li>${key}: ${value<1?Math.round(value*100)+'%':value}</li>`).join('');tip.innerHTML=`<strong>${item.icon} ${item.name}</strong><small>Bậc ${item.tier} · ${item.requiredRealm}</small><p>${item.description}</p><ul>${stats}</ul><em>Chuột phải để ${item.category==='consumables'&&!item.accessory?'sử dụng':'trang bị'}</em>`;tip.hidden=false;this.positionItemTooltip(event);}
+  ensureInventoryUI(){if(this.inventoryUI)return;const el=document.createElement('section');el.className='screen-overlay inventory-overlay';el.hidden=true;el.innerHTML='<div class="inventory-card"><header><div><small>HÀNH TRANG TU SĨ</small><h2>Túi Đồ</h2></div><button class="modal-close" data-close><kbd>Esc</kbd> ×</button></header><div class="inventory-layout"><aside><h3>Trang Bị</h3><div class="equipment-slots"></div><div class="inventory-gold">🪙 <b data-inventory-gold>0</b> Vàng</div></aside><main><div class="inventory-grid"></div></main></div><div class="item-tooltip" hidden></div><p class="inventory-hint">Chuột phải: trang bị/dùng · Chuột phải ô đang mặc: tháo ra</p></div>';this.ui.app.appendChild(el);this.inventoryUI=el;this.hudManager.register('inventory',el);el.querySelector('[data-close]').onclick=()=>this.hudManager.close('inventory');el.addEventListener('contextmenu',e=>{const slot=e.target.closest('[data-item-id]');if(!slot)return;e.preventDefault();const id=slot.dataset.itemId,item=itemById(id),action=slot.classList.contains('equipment-slot')?'unequip':item?.category==='consumables'&&!item.accessory?'use':'equip';this.performItemAction(action,id).then(ok=>{if(ok)this.toast(action==='use'?'Đã sử dụng vật phẩm':action==='unequip'?'Đã tháo trang bị':'Đã trang bị','success');});});el.addEventListener('mouseover',e=>{const slot=e.target.closest('[data-item-id]');if(!slot)return;this.showItemTooltip(slot.dataset.itemId,e);});el.addEventListener('mousemove',e=>this.positionItemTooltip(e));el.addEventListener('mouseout',e=>{if(e.target.closest('[data-item-id]'))this.inventoryUI.querySelector('.item-tooltip').hidden=true;});this.renderInventory();}
+  renderInventory(){if(!this.inventoryUI)return;const icon=item=>item?.asset?`<img class="equipment-art equipment-art--small" src="${item.asset}" alt="">`:`<i>${item?.icon??'◇'}</i>`,gold=this.inventoryUI.querySelector('[data-inventory-gold]');if(gold)gold.textContent=Math.floor(this.shopSystem.gold);const labels={weapon:'Vũ Khí',armor:'Giáp',accessory:'Phụ Kiện'};this.inventoryUI.querySelector('.equipment-slots').innerHTML=Object.entries(labels).map(([slot,label])=>{const id=this.shopSystem.equipment[slot],item=itemForFaction(id,this.profile.faction);return `<div class="equipment-slot ${item?'has-item':''}" ${item?`data-item-id="${item.id}"`:''}><small>${label}</small>${icon(item)}<strong>${item?.name??'Trống'}</strong></div>`;}).join('');const counts=new Map();for(const id of this.shopSystem.inventory)counts.set(id,(counts.get(id)??0)+1);const entries=[...counts.entries()];this.inventoryUI.querySelector('.inventory-grid').innerHTML=Array.from({length:30},(_,index)=>{const [id,count]=entries[index]??[],item=itemForFaction(id,this.profile.faction);return `<div class="inventory-slot ${item?'has-item':''}" ${item?`data-item-id="${id}"`:''}>${item?`${icon(item)}<span>${item.name}</span><b>${count>1?`×${count}`:''}</b>`:'<i>·</i>'}</div>`;}).join('');}
+  ensureEquippedHud(){if(this.equippedHud)return;const panel=document.createElement('aside');panel.className='equipped-hud';panel.setAttribute('aria-label','Trang bị đang mang');panel.innerHTML='<header>TRANG BỊ ĐANG MANG</header><div data-equipped-hud></div>';this.ui.hud?.appendChild(panel);this.equippedHud=panel;this.renderEquippedHud();}
+  renderEquippedHud(){if(!this.equippedHud)return;const signature=JSON.stringify(this.shopSystem.equipment);if(signature===this.lastEquippedHudSignature)return;this.lastEquippedHudSignature=signature;const labels={weapon:'Vũ Khí',armor:'Giáp',accessory:'Phụ Kiện'},content=this.equippedHud.querySelector('[data-equipped-hud]');content.innerHTML=Object.entries(labels).map(([slot,label])=>{const item=itemForFaction(this.shopSystem.equipment[slot],this.profile.faction);const visual=item?.asset?`<img src="${item.asset}" alt="">`:`<i>${item?.icon??'◇'}</i>`;return `<div class="equipped-hud__slot ${item?'has-item':''}">${visual}<span><small>${label}</small><strong title="${item?.name??'Chưa trang bị'}">${item?.name??'Chưa trang bị'}</strong></span></div>`;}).join('');}
+  showItemTooltip(id,event){const item=itemForFaction(id,this.profile.faction),tip=this.inventoryUI.querySelector('.item-tooltip');if(!item||!tip)return;const stats=[['Công',item.damage??item.atkBonus],['Phòng thủ',item.defense],['Linh lực',item.maxMana],['Tốc đánh',item.attackSpeed],['Bạo kích',item.critRate],['Hút máu',item.lifeSteal],['Hồi máu',item.heal],['Hồi linh lực',item.mana]].filter(([,value])=>value).map(([label,value])=>`<li>${label}: ${value<1?Math.round(value*100)+'%':value}</li>`).join('');tip.innerHTML=`<strong>${item.icon} ${item.name}</strong><small>Bậc ${item.tier} · ${item.requiredRealm}</small><p>${item.description}</p><ul>${stats}</ul><em>Chuột phải để ${item.category==='consumables'&&!item.accessory?'sử dụng':'trang bị'}</em>`;tip.hidden=false;this.positionItemTooltip(event);}
   positionItemTooltip(event){const tip=this.inventoryUI?.querySelector('.item-tooltip');if(!tip||tip.hidden)return;tip.style.left=`${Math.min(innerWidth-280,event.clientX+16)}px`;tip.style.top=`${Math.min(innerHeight-190,event.clientY+16)}px`;}
   toggleInventory(){this.renderInventory();return this.hudManager.toggle('inventory');}
 
   createTerrainProps(){const props=[];let seed=9173;const random=()=>((seed=seed*16807%2147483647)-1)/2147483646;for(let i=0;i<75;i++){const x=random()*92-46,z=random()*92-46;if(Math.abs(x)<5)continue;props.push({x,z,type:i%7===0?'rock':i%5===0?'fence':'tree'});}return props;}
 
-  screen(world) { return { x: this.canvas.width / 2 + (world.x - this.camera.x) * 18, y: this.canvas.height / 2 + (world.z - this.camera.z) * 12 }; }
+  screen(world) { return { x: this.canvas.width / 2 + (world.x - this.camera.x) * 18, y: this.canvas.height / 2 + (world.z - this.camera.z) * 12-(Number(world.y)||0)*4 }; }
   pixelRect(x, y, w, h, color) { this.ctx.fillStyle = color; this.ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
 
   drawWorld() {
@@ -379,7 +441,8 @@ export class CultivationGame {
 
   drawEnemy(enemy) {
     if ((enemy.alive === false || enemy.hp <= 0) && enemy.animator?.finished) return; const p = this.screen(enemy.position); const imp = enemy.type === 'flame_imp', trash = imp || enemy.type === 'spirit_fox';
-    if(this.monsterSprite.complete&&this.monsterSprite.naturalWidth&&enemy.animator){const row=enemy.isBoss||enemy.type==='rogue_cultivator'?2:imp?1:0,frame=enemy.attackFrame?.(performance.now())??enemy.animator.frame,sw=this.monsterSprite.naturalWidth/22,sh=this.monsterSprite.naturalHeight/3,size=enemy.isBoss?126:enemy.type==='rogue_cultivator'?96:82;this.ctx.save();if(enemy.hurt>0)this.ctx.filter='brightness(1.5) sepia(1) saturate(8) hue-rotate(315deg)';this.ctx.drawImage(this.monsterSprite,frame*sw,row*sh,sw,sh,Math.round(p.x-size/2),Math.round(p.y-size*.9),size,size);this.ctx.restore();if(enemy.alive!==false){const ratio=clamp(enemy.hp/Math.max(1,enemy.maxHp),0,1);this.pixelRect(p.x-14,p.y-(enemy.isBoss?58:38),28,3,'#180b12');this.pixelRect(p.x-14,p.y-(enemy.isBoss?58:38),28*ratio,3,'#ef4b5c');}return;}
+    if(enemy.id===this.lockedTargetId&&enemy.alive!==false){this.ctx.save();this.ctx.strokeStyle='#ffe27a';this.ctx.lineWidth=2;this.ctx.beginPath();this.ctx.ellipse(p.x,p.y-3,18,8,0,0,Math.PI*2);this.ctx.stroke();this.ctx.restore();}
+    if(this.monsterSprite.complete&&this.monsterSprite.naturalWidth&&enemy.animator){const fallbackRow=enemy.isBoss||enemy.type==='rogue_cultivator'?2:imp?1:0,row=Number.isInteger(enemy.spriteVariant)?enemy.spriteVariant:fallbackRow,frame=enemy.attackFrame?.(performance.now())??enemy.animator.frame,sw=this.monsterSprite.naturalWidth/22,sh=this.monsterSprite.naturalHeight/3,size=enemy.isBoss?126:enemy.type==='rogue_cultivator'?96:82,wave=Math.max(1,Number(enemy.wave)||1),hue=(wave-1)*47%360;this.ctx.save();if(enemy.hurt>0)this.ctx.filter='brightness(1.5) sepia(1) saturate(8) hue-rotate(315deg)';else if(wave>1)this.ctx.filter=`hue-rotate(${hue}deg) saturate(${1+Math.min(.75,wave*.06)}) brightness(${1+Math.min(.18,wave*.015)})`;this.ctx.drawImage(this.monsterSprite,frame*sw,row*sh,sw,sh,Math.round(p.x-size/2),Math.round(p.y-size*.9),size,size);this.ctx.restore();if(enemy.alive!==false){const ratio=clamp(enemy.hp/Math.max(1,enemy.maxHp),0,1),barY=p.y-(enemy.isBoss?58:38);this.pixelRect(p.x-18,barY,36,3,'#180b12');this.pixelRect(p.x-18,barY,36*ratio,3,wave>=8?'#c45cff':wave>=4?'#ff8b3d':'#ef4b5c');this.ctx.fillStyle='#ffe7a0';this.ctx.font='bold 7px monospace';this.ctx.textAlign='center';this.ctx.fillText(`Lv.${enemy.level??wave} · Vòng ${wave}`,Math.round(p.x),Math.round(barY-3));}return;}
     this.ctx.save(); if (enemy.hurt > 0) { this.ctx.globalAlpha = .55 + Math.sin(performance.now() * .05) * .35; this.ctx.translate(Math.sin(performance.now() * .08) * 2, 0); }
     if (imp) { this.pixelRect(p.x - 6,p.y - 13,12,12,'#25162c'); this.pixelRect(p.x - 4,p.y - 19,8,8,'#dc3564'); this.pixelRect(p.x - 2,p.y - 12,2,2,'#ffd56b'); }
     else if (enemy.isBoss) { this.pixelRect(p.x-16,p.y-37,32,35,'#352839'); this.pixelRect(p.x-12,p.y-45,24,12,'#9a3046'); this.pixelRect(p.x-24,p.y-29,48,8,'#bf8b3a'); }
@@ -403,19 +466,22 @@ export class CultivationGame {
 
   updateUI() {
     this.ui.hud?.removeAttribute('hidden');this.ui.hud?.classList.add('is-visible');document.querySelector('.player-panel')?.classList.remove('is-collapsed');
+    this.renderGold();
+    this.renderEquippedHud();
     const ratio=(v,m)=>`${clamp(v/Math.max(1,m),0,1)*100}%`; if(this.ui.hpFill)this.ui.hpFill.style.width=ratio(this.player.hp,this.player.maxHp); if(this.ui.mpFill)this.ui.mpFill.style.width=ratio(this.profile.mp,this.profile.maxMp);
     if(this.ui.hpText)this.ui.hpText.textContent=`${Math.ceil(this.player.hp)} / ${this.player.maxHp}`; if(this.ui.mpText)this.ui.mpText.textContent=`${Math.ceil(this.profile.mp)} / ${this.profile.maxMp}`; if(this.ui.playerName)this.ui.playerName.textContent=this.profile.name; if(this.ui.realmName)this.ui.realmName.textContent=this.cultivationSystem.displayName; if(this.ui.sectName)this.ui.sectName.textContent=FACTIONS[this.profile.faction]?.name;if(this.ui.attackPower)this.ui.attackPower.textContent=Math.round(this.player.totalAtk);
-    this.ui.skillbar?.querySelectorAll('[data-skill]').forEach(button=>{const slot=button.dataset.skill,skill=slot==='basic'?{name:'Kiếm Quyết',manaCost:0}:this.skillSystem.skillForSlot(slot);button.classList.toggle('is-locked',!skill);const label=button.querySelector('strong');if(label)label.textContent=skill?.name??'Ô trống';const visual=cooldownVisual(this.cooldowns.get(slot)??0,this.cooldownTotals.get(slot)??0);this.hudManager.updateSkillCooldown(button,visual,{insufficientMana:Boolean(skill&&this.profile.mp<(skill.manaCost??0))});});
+    this.ui.skillbar?.querySelectorAll('[data-skill]').forEach(button=>{const slot=button.dataset.skill,skill=slot==='basic'?{id:'basic_sword',name:'Kiếm Quyết',shortName:'Kiếm Quyết',icon:'Kiếm',manaCost:0}:this.skillSystem.skillForSlot(slot);button.classList.toggle('is-locked',!skill);button.classList.toggle('is-ready',Boolean(skill));button.style.setProperty('--skill-color',skill?skillThemeColor(skill):'#73808c');const label=button.querySelector('strong'),icon=button.querySelector('.skill-slot__icon');if(label){label.textContent=skill?.shortName??skill?.name??'Ô trống';label.title=skill?.name??'Ô trống';}if(icon){icon.textContent=skill?vietnameseSkillGlyph(skill):'Trống';icon.title=skill?.name??'Ô trống';}const visual=cooldownVisual(this.cooldowns.get(slot)??0,this.cooldownTotals.get(slot)??0);this.hudManager.updateSkillCooldown(button,visual,{insufficientMana:Boolean(skill&&this.profile.mp<(skill.manaCost??0))});});
     const boss=[...this.enemies.values()].find(e=>e.isBoss&&e.alive!==false&&e.hp>0);const showBoss=Boolean(boss&&this.bossEngaged);this.ui.bossHud?.toggleAttribute('hidden',!showBoss);this.ui.bossHud?.classList.toggle('is-visible',showBoss);if(showBoss){if(this.ui.bossName)this.ui.bossName.textContent=boss.label??'Hộ Điện Khôi Lỗi';if(this.ui.bossFill)this.ui.bossFill.style.width=ratio(boss.hp,boss.maxHp);if(this.ui.bossText)this.ui.bossText.textContent=`${Math.ceil(boss.hp)} / ${boss.maxHp}`;}
     const cultivation=this.cultivationSystem;if(this.ui.qiFill)this.ui.qiFill.style.width=`${cultivation.progress}%`;if(this.ui.qiText)this.ui.qiText.textContent=`Lv ${cultivation.level} · ${Math.round(cultivation.currentExp)} / ${cultivation.requiredEXP} EXP`;
-    if(this.ui.interactionPrompt){this.ui.interactionPrompt.textContent=this.state.meditation?'[C] Kết thúc tĩnh tọa':'[B] Túi Đồ · [P] Cửa Hàng · [K] Kỹ Năng';this.ui.interactionPrompt.classList.add('is-visible');}
+    this.updateObjective();
+    if(this.ui.interactionPrompt){this.ui.interactionPrompt.textContent=this.state.meditation?'[C] Kết thúc tĩnh tọa':this.canRequestBreakthrough()?'[B] Bắt đầu Độ Kiếp':'[B] Túi Đồ · [P] Cửa Hàng · [K] Kỹ Năng';this.ui.interactionPrompt.classList.add('is-visible');}
   }
 
   ensureSkillTree(){this.skillTree=this.skillTreePanel.ensure();return this.skillTree;}
   toggleSkillTree(force){return this.skillTreePanel.toggle(force);}
   renderSkillTree(){return this.skillTreePanel.render();}
-  toast(message,tone='info'){if(!message||!this.ui.toastStack)return;const el=document.createElement('div');el.className=`toast toast--${tone} is-visible`;el.textContent=message;this.ui.toastStack.appendChild(el);setTimeout(()=>el.remove(),2600);}
+  toast(message,tone='info'){if(!message||!this.ui.toastStack)return;const el=document.createElement('div');el.className=`toast toast--${tone} is-visible`;el.setAttribute('role',tone==='error'?'alert':'status');el.textContent=message;this.ui.toastStack.appendChild(el);setTimeout(()=>el.remove(),2600);}
   resize(){const scale=Math.max(2,Math.floor(Math.min(innerWidth/480,innerHeight/270)));this.canvas.width=Math.max(320,Math.floor(innerWidth/scale));this.canvas.height=Math.max(180,Math.floor(innerHeight/scale));this.ctx.imageSmoothingEnabled=false;}
   loop(time){if(!this.state.running)return;this.frameRequest=requestAnimationFrame(this.bound.loop);const elapsed=Math.max(0,(time-this.lastFrame)/1000);this.lastFrame=time;const dt=Math.min(.05,elapsed);try{if(!this.state.paused&&!this.player.getFeedback(time).hitStopped)this.update(dt);this.render();this.updateUI();}catch(error){console.error('Game frame recovered after an error:',error);}}
-  destroy(){if(this.destroyed)return;this.destroyed=true;this.state.running=false;this.keys.clear();if(this.frameRequest)cancelAnimationFrame(this.frameRequest);this.mapManager?.destroy();this.goldDropSystem?.clear();this.vfxManager?.clear();this.uiManager?.destroy();this.skillTreePanel?.destroy();this.cleanup.splice(0).forEach(remove=>remove());for(const overlay of [this.shopUI,this.inventoryUI,this.tribulationUI])overlay?.remove();this.socket?.disconnect();}
+  destroy(){if(this.destroyed)return;this.destroyed=true;this.state.running=false;this.keys.clear();if(this.frameRequest)cancelAnimationFrame(this.frameRequest);this.mapManager?.destroy();this.goldDropSystem?.clear();this.vfxManager?.clear();this.uiManager?.destroy();this.skillTreePanel?.destroy();this.cleanup.splice(0).forEach(remove=>remove());for(const overlay of [this.shopUI,this.inventoryUI,this.tribulationUI,this.touchControls])overlay?.remove();this.socket?.disconnect();}
 }

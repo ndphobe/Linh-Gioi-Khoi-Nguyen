@@ -86,17 +86,17 @@
                 </label>
 
                 <label class="field-group" for="room-input">
-                  <span class="field-label">Mật lệnh đạo hữu</span>
+                  <span class="field-label">Tục Danh</span>
                   <span class="input-shell">
                     <span class="input-icon" aria-hidden="true">門</span>
                     <input
                       id="room-input"
                       name="roomCode"
                       type="text"
-                      maxlength="12"
+                      maxlength="24"
                       autocomplete="off"
                       spellcheck="false"
-                      placeholder="Để trống để tạo phòng"
+                      placeholder="Nhập tục danh có dấu"
                     />
                   </span>
                 </label>
@@ -196,8 +196,8 @@
                 </div>
 
                 <p class="feature-intro">
-                  Trực tiếp điều khiển tu sĩ, khiêu chiến Hộ Điện Khôi Lỗi và vượt ba đợt
-                  Tiểu Lôi Kiếp để kết thành Kim Đan.
+                  Trực tiếp điều khiển tu sĩ, vượt các vòng yêu linh ngày càng mạnh và
+                  nghịch thiên độ kiếp khi tiến lên Nguyên Anh, Hóa Thần.
                 </p>
 
                 <div class="feature-list" aria-label="Tính năng nổi bật">
@@ -211,7 +211,7 @@
                   </div>
                   <div class="feature-item">
                     <span class="feature-item__sigil" aria-hidden="true">盟</span>
-                    <span><strong>Đồng hành trực tuyến</strong><small>Tạo phòng hoặc nhập mật lệnh đạo hữu</small></span>
+                    <span><strong>Đồng hành trực tuyến</strong><small>Dùng Tục Danh để gặp đạo hữu cùng phòng</small></span>
                   </div>
                 </div>
 
@@ -222,11 +222,11 @@
                     <div class="control-item"><kbd>Chuột</kbd><span>Xoay camera</span></div>
                     <div class="control-item"><kbd>Trái</kbd><span>Xuất kiếm</span></div>
                     <div class="control-item"><kbd>Phải</kbd><span>Đỡ đòn</span></div>
-                    <div class="control-item"><kbd>Shift</kbd><span>Thân pháp</span></div>
+                    <div class="control-item"><kbd>Shift / Space</kbd><span>Thân pháp</span></div>
                     <div class="control-item"><kbd>Q–G</kbd><span>Pháp thuật</span></div>
                     <div class="control-item"><kbd>Tab</kbd><span>Khóa mục tiêu</span></div>
-                    <div class="control-item"><kbd>V / M</kbd><span>Tương tác / Bản đồ</span></div>
-                    <div class="control-item"><kbd>B</kbd><span>Túi đồ</span></div>
+                    <div class="control-item"><kbd>M</kbd><span>Bản đồ</span></div>
+                    <div class="control-item"><kbd>B</kbd><span>Túi đồ / Độ kiếp khi viên mãn</span></div>
                     <div class="control-item"><kbd>P</kbd><span>Cửa hàng</span></div>
                     <div class="control-item"><kbd>K</kbd><span>Bảng kỹ năng</span></div>
                     <div class="control-item"><kbd>Esc</kbd><span>Cài đặt / Đóng giao diện</span></div>
@@ -323,37 +323,37 @@
 
         <div id="skillbar" class="skillbar" aria-label="Thanh kỹ năng">
           <button class="skill-slot skill-slot--basic is-ready" type="button" data-skill="basic">
-            <span class="skill-slot__icon" aria-hidden="true">斬</span>
+            <span class="skill-slot__icon" aria-hidden="true">KQ</span>
             <kbd>Trái</kbd>
             <strong>Kiếm quyết</strong>
             <i class="skill-slot__cooldown"></i>
           </button>
           <button class="skill-slot is-ready" type="button" data-skill="q">
-            <span class="skill-slot__icon" aria-hidden="true">縛</span>
+            <span class="skill-slot__icon" aria-hidden="true">ĐT</span>
             <kbd>Q</kbd>
             <strong>Định thân</strong>
             <i class="skill-slot__cooldown"></i>
           </button>
           <button class="skill-slot is-ready" type="button" data-skill="e">
-            <span class="skill-slot__icon" aria-hidden="true">萬</span>
+            <span class="skill-slot__icon" aria-hidden="true">VK</span>
             <kbd>E</kbd>
             <strong>Vạn kiếm</strong>
             <i class="skill-slot__cooldown"></i>
           </button>
           <button class="skill-slot is-ready" type="button" data-skill="r">
-            <span class="skill-slot__icon" aria-hidden="true">仙</span>
+            <span class="skill-slot__icon" aria-hidden="true">TT</span>
             <kbd>R</kbd>
             <strong>Trảm tiên</strong>
             <i class="skill-slot__cooldown"></i>
           </button>
           <button class="skill-slot is-ready" type="button" data-skill="f">
-            <span class="skill-slot__icon" aria-hidden="true">盾</span>
+            <span class="skill-slot__icon" aria-hidden="true">LK</span>
             <kbd>F</kbd>
             <strong>Linh khiên</strong>
             <i class="skill-slot__cooldown"></i>
           </button>
-          <button class="skill-slot skill-slot--ultimate" type="button" data-skill="g">
-            <span class="skill-slot__icon" aria-hidden="true">天</span>
+          <button class="skill-slot skill-slot--ultimate is-ready" type="button" data-skill="g">
+            <span class="skill-slot__icon" aria-hidden="true">TK</span>
             <kbd>G</kbd>
             <strong>Thiên kiếm</strong>
             <i class="skill-slot__cooldown"></i>
@@ -454,9 +454,9 @@
         <div class="result-aura" aria-hidden="true"><i></i><i></i><i></i></div>
         <div class="result-card parchment-panel">
           <span class="result-card__eyebrow">Thiên địa chứng giám</span>
-          <h2 id="result-title">Kim Đan Đại Thành</h2>
-          <p class="result-card__lead">Linh lực ngưng tụ, kim quang nhập thể. Từ đây đạo hữu đã có thể Ngự Kiếm Phi Hành.</p>
-          <div class="realm-medallion" aria-hidden="true"><span>丹</span></div>
+          <h2 id="result-title">Đại Cảnh Giới Đột Phá</h2>
+          <p class="result-card__lead">Thiên lôi tôi luyện thần hồn, đại cảnh giới đã thành. Con đường tu hành mới đã được khai mở.</p>
+          <div class="realm-medallion" aria-hidden="true"><span>劫</span></div>
           <div class="result-stats">
             <div><span>Thời gian</span><strong data-result="time">08:42</strong></div>
             <div><span>Yêu linh đã trừ</span><strong data-result="kills">12</strong></div>

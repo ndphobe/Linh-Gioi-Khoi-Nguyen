@@ -24,8 +24,9 @@ const socket=io(url,{transports:['websocket'],forceNew:true,timeout:5_000});
 try{
   await new Promise((resolve,reject)=>{socket.once('connect',resolve);socket.once('connect_error',reject);});
   const joined=await emitAck(socket,'room:join',{roomCode,name:'Kiểm Thử Cơ Chế',faction:'heretic',session:{gold:500,cultivationSystem:{level:2,currentExp:200}}});
+  const startingExp=joined.player.cultivationSystem.currentExp;
   const purchase=await emitAck(socket,'shop:action',{action:'buy',itemId:'healing_pill'});
-  if(purchase.shopSystem.gold!==465||!purchase.shopSystem.inventory.includes('healing_pill'))throw new Error('Authoritative purchase snapshot was incorrect');
+  if(purchase.shopSystem.gold!==joined.player.gold-35||!purchase.shopSystem.inventory.includes('healing_pill'))throw new Error('Authoritative purchase snapshot was incorrect');
 
   for(let index=0;index<40;index++){
     socket.emit('player:move',{position:{x:-6,y:0,z:14.25},yaw:Math.PI,velocity:{x:0,z:-7.2},sequence:index+1});
@@ -42,7 +43,7 @@ try{
   const lootEvent=await lootPromise;
   const cultivation=lootEvent.loot?.cultivationSystem;
   if(!(lootEvent.loot?.exp>0))throw new Error('Monster defeat did not emit an EXP drop');
-  if(!(cultivation?.currentExp>200))throw new Error('Authoritative EXP did not increase');
+  if(!(cultivation?.currentExp>startingExp)||cultivation?.level<joined.player.cultivationSystem.level)throw new Error('Authoritative EXP did not increase');
 
   process.stdout.write(`${JSON.stringify({passed:true,roomCode,joinedGold:joined.player.gold,purchaseGold:purchase.shopSystem.gold,purchased:purchase.shopSystem.inventory,hitIds:hits,expDrop:lootEvent.loot.exp,cultivation},null,2)}\n`);
 }finally{socket.disconnect();}

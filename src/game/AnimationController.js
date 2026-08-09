@@ -12,8 +12,10 @@ export const PLAYER_ANIMATION_CLIPS = Object.freeze({
 export const MONSTER_ANIMATION_CLIPS = Object.freeze({
   idle: Object.freeze({ start: 0, count: 4, fps: 5, loop: true }),
   walk: Object.freeze({ start: 4, count: 6, fps: 9, loop: true }),
-  attack: Object.freeze({ start: 10, count: 4, fps: 12, loop: false, markerFrame: 2 }),
-  hurt: Object.freeze({ start: 14, count: 2, fps: 14, loop: false }),
+  // Atlas frames 11-15 are transition/fade fragments. Reusing the last full
+  // movement poses keeps the monster visible throughout its wind-up and hit.
+  attack: Object.freeze({ frames: [7, 8, 9, 10, 9], fps: 12, loop: false, markerFrame: 2 }),
+  hurt: Object.freeze({ frames: [2, 3, 2], fps: 14, loop: false }),
   death: Object.freeze({ start: 16, count: 6, fps: 9, loop: false }),
 });
 

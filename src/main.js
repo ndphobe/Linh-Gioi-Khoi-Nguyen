@@ -161,6 +161,7 @@ async function beginJourney() {
     sect: selectedSect,
     roomCode,
     characterId: activeCharacter.id,
+    resumeToken: activeCharacter.resumeToken,
     realm: activeCharacter.realm,
     realmName: activeCharacter.realmName,
     qi: activeCharacter.currentExp,
@@ -176,6 +177,7 @@ async function beginJourney() {
     gold: activeCharacter.gold,
     allocatedStats: activeCharacter.allocatedStats,
     currentRegion: activeCharacter.currentRegion,
+    resources: activeCharacter.resources,
   };
 
   game = new CultivationGame({
@@ -185,14 +187,14 @@ async function beginJourney() {
     audio,
     onProfileChange: (next) => {
       characterManager.updateActive(next);
-      const realmId = next.realm === 'goldenCore' || next.realm === 'golden_core' || next.flightUnlocked ? 'golden_core' : 'foundation';
+      const realmId = next.cultivationSystem?.realmId ?? next.realm ?? 'qi_refining';
       persistentStorage.setItem(STORAGE_KEY, saveProfile({
         ...stored,
         name: next.name,
         factionId: next.faction,
         realmId,
         cultivation: next.qi,
-        questPhase: next.flightUnlocked ? 'complete' : 'arrival',
+        questPhase: next.cultivationSystem?.level > 1 ? 'complete' : 'arrival',
         skillSystem: next.skillSystem,
         cultivationSystem: next.cultivationSystem,
         shopSystem: next.shopSystem,
@@ -250,15 +252,15 @@ function returnToOnboarding() {
 cards.forEach((card) => card.addEventListener('click', () => selectSect(card.dataset.sect)));
 startButton.addEventListener('click', beginJourney);
 nameInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') beginJourney();
+  if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) beginJourney();
 });
-roomInput.addEventListener('input', () => {
-  const cursor = roomInput.selectionStart;
+// Do not rewrite the value on every input event: Vietnamese Telex/VNI uses an
+// active IME composition and mutating the field mid-composition breaks accents.
+roomInput.addEventListener('blur', () => {
   roomInput.value = normalizeRoomCode(roomInput.value);
-  roomInput.setSelectionRange?.(cursor, cursor);
 });
 roomInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') beginJourney();
+  if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) beginJourney();
 });
 
 document.querySelector('[data-action="toggle-map"]')?.addEventListener('click', () => game?.toggleWorldMap());

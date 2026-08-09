@@ -1,6 +1,6 @@
 # Linh Giới Khởi Nguyên — bản chơi thử online
 
-Đây là **vertical slice** của ý tưởng game tu tiên hành động góc nhìn thứ ba trong GDD. Mục tiêu của bản này là chứng minh vòng lặp cốt lõi — vào phòng, điều khiển nhân vật, chiến đấu, tích tụ tu vi và vượt lôi kiếp từ **Trúc Cơ** lên **Kim Đan** — chứ chưa phải một MMORPG hoàn chỉnh.
+Đây là **vertical slice** của ý tưởng game tu tiên hành động góc nhìn thứ ba trong GDD. Vòng lặp cốt lõi gồm vào phòng, chiến đấu qua các vòng quái tăng cấp, tích tụ tu vi và vượt lôi kiếp ở hai đại cảnh giới **Nguyên Anh** và **Hóa Thần**.
 
 ## Phạm vi hiện có
 
@@ -8,12 +8,12 @@
 - Chọn tên và một trong ba phe: Chính Đạo, Ma Đạo hoặc Tà Đạo.
 - Di chuyển, ngắm, đánh thường, né/lướt và sử dụng bộ kỹ năng Q/E/R/F/G.
 - Quái thường, các kiểu hành vi chiến đấu và một cuộc chạm trán cao trào.
-- Tu vi, nhiệm vụ hướng dẫn, tĩnh tọa và thử thách ba đợt lôi kiếp Trúc Cơ → Kim Đan.
+- Tu vi, nhiệm vụ hướng dẫn, tĩnh tọa và hai mốc lôi kiếp Kim Đan → Nguyên Anh, Nguyên Anh → Hóa Thần.
 - Phòng chơi online nhẹ để nhiều trình duyệt có thể nhìn thấy trạng thái của nhau trong cùng mã phòng.
-- Giao diện lưu đạo hiệu, phe và cột mốc cảnh giới bằng `localStorage`; quyền chiến đấu và phần thưởng trong phiên vẫn thuộc máy chủ.
-- Đột phá Kim Đan mở khóa Ngự Kiếm Phi Hành và chặng bay qua ba Tiên Hoàn để kết thúc bản thử nghiệm.
+- Trình duyệt chỉ lưu đạo hiệu và một resume token ngẫu nhiên; tiến trình, kinh tế, trang bị, tài nguyên và trạng thái đột phá authoritative được máy chủ checkpoint vào `.data/sessions.json`.
+- Đột phá Nguyên Anh mở khóa Ngự Kiếm Phi Hành; yêu cầu EXP tăng mạnh theo cấp.
 
-Toàn bộ chín cảnh giới vẫn được khai báo trong dữ liệu để định hình đường phát triển, nhưng bản chơi thử **chỉ triển khai bước đột phá Trúc Cơ → Kim Đan**.
+Các cảnh giới hiện có tiến triển liên tục; Kim Đan không cần độ kiếp, còn Nguyên Anh và Hóa Thần là hai cửa ải thiên kiếp.
 
 ## Hướng mỹ thuật pixel
 
@@ -55,7 +55,7 @@ npm.cmd run smoke:network
 | Chuột | Xoay camera / ngắm |
 | Chuột trái | Kiếm Khí — đánh thường |
 | Chuột phải | Đỡ đòn / pháp bảo |
-| `Space` | Nhảy / khinh công |
+| `Space` hoặc `Shift` | Lướt né / khinh công |
 | `Shift` | Lướt né có thời gian vô địch ngắn |
 | `Q` | Định Thân Phù |
 | `E` | Vạn Kiếm Quy Tông |
@@ -64,8 +64,9 @@ npm.cmd run smoke:network
 | `G` | Hóa Thần Biến |
 | `Tab` | Khóa / đổi mục tiêu khi chế độ đó khả dụng |
 | `C` | Bắt đầu / kết thúc tĩnh tọa trong khu an toàn |
-| `B` | Kích hoạt đột phá khi đứng tại Trận Pháp |
-| `V` hoặc `T` | Triệu hồi / thu hồi phi kiếm sau Kim Đan |
+| `B` | Mở túi đồ; tại Trận Đài khi đủ điều kiện sẽ kích hoạt đột phá |
+| `N` | Yêu cầu bắt đầu đột phá (phím thay thế) |
+| `V` hoặc `T` | Triệu hồi / thu hồi phi kiếm sau Nguyên Anh |
 | `M` | Mở hoặc đóng bản đồ |
 | `Esc` | Thả chuột hoặc mở menu |
 
@@ -82,8 +83,8 @@ Các module luật không truy cập màn hình, bộ nhớ trình duyệt hay k
 Phòng chơi hiện tại chỉ nên được xem là networking thử nghiệm:
 
 - Mã phòng dài 3–12 ký tự được chuẩn hóa trước khi tham gia; mỗi phòng chứa tối đa 8 người.
-- Client gửi **ý định điều khiển** và nhận snapshot trạng thái thay vì được quyền quyết định vật phẩm, sát thương hoặc cảnh giới lâu dài.
-- Máy chủ hiện là nguồn chân lý cho giới hạn di chuyển, cooldown, sát thương, phần thưởng, tu vi và kết quả đột phá; snapshot công khai và trạng thái riêng được phát ở 20 Hz.
+- Client gửi **ý định điều khiển** và nhận snapshot trạng thái thay vì được quyền quyết định vật phẩm, kỹ năng, sát thương hoặc cảnh giới lâu dài. Payload save do client tự khai không được dùng để cấp vàng/trang bị/tu vi.
+- Máy chủ hiện là nguồn chân lý cho giới hạn di chuyển, cooldown, sát thương, phần thưởng, tu vi, skill tree và kết quả đột phá; snapshot công khai và trạng thái riêng được phát ở 20 Hz. Resume token ngăn hai socket điều khiển cùng một nhân vật đồng thời.
 - Client nội suy snapshot; server giới hạn gói di chuyển, tốc độ, dash, cooldown và cửa sổ phản đòn. Vẫn cần xác thực tài khoản, reconciliation nâng cao, chống gian lận và lưu dữ liệu phía server trước khi có kinh tế hoặc PvP xếp hạng.
 
 Không nên mở rộng thẳng lên 50 người. Bước kế tiếp hợp lý là ổn định phòng 4–8 người và đấu 1v1, đo tải rồi mới thêm phân vùng bản đồ hoặc interest management.

@@ -1,5 +1,7 @@
-import { CultivationSystem } from "../src/game/CultivationSystem.js";
+import { CULTIVATION_BASE_EXP, CULTIVATION_REALM_MULTIPLIER, CultivationSystem, progressionCapForLevel, realmForLevel, tribulationGateForLevel } from "../src/game/CultivationSystem.js";
 import { monsterAttackFor } from "../src/game/Monster.js";
+import { CULTIVATION_REALMS, SkillSystemManager } from "../src/game/SkillSystem.js";
+import { itemForFaction } from "../src/game/ShopSystem.js";
 
 /**
  * Authoritative, renderer-agnostic simulation for the online vertical slice.
@@ -31,6 +33,7 @@ export const SAFE_ZONE = Object.freeze({
 });
 
 export const BREAKTHROUGH_ALTAR = Object.freeze({ x: 0, y: 0, z: 23, radius: 8 });
+export const BREAKTHROUGH_WAVES = 2;
 
 const PLAYER_SPAWNS = Object.freeze([
   Object.freeze({ x: -4, y: 0, z: 27 }),
@@ -137,23 +140,109 @@ export const WEAPON_ATTACK_BONUSES = Object.freeze({
   jade_sword: 22,
   blood_sabre: 48,
   heaven_blade: 95,
+  celestial_path_sword: 58,
+  blood_path_saber: 64,
+  nether_path_twinblades: 52,
+  orthodox_stream_sword:32,orthodox_dipper_sword:108,orthodox_supreme_sword:190,
+  demonic_soul_saber:36,demonic_inferno_scythe:116,demonic_blood_emperor:205,
+  heretic_scale_sword:29,heretic_spider_blades:98,heretic_plague_staff:174,
 });
 
 export const SHOP_CATALOG = Object.freeze({
-  iron_sword: Object.freeze({ category: "weapons", price: 80, requiredOrder: 0 }),
-  jade_sword: Object.freeze({ category: "weapons", price: 260, requiredOrder: 1 }),
-  blood_sabre: Object.freeze({ category: "weapons", price: 620, requiredOrder: 2 }),
-  heaven_blade: Object.freeze({ category: "weapons", price: 1500, requiredOrder: 3 }),
-  spirit_robe: Object.freeze({ category: "armor", price: 110, requiredOrder: 0 }),
-  jade_armor: Object.freeze({ category: "armor", price: 380, requiredOrder: 1 }),
-  dragon_armor: Object.freeze({ category: "armor", price: 900, requiredOrder: 2 }),
+  iron_sword: Object.freeze({ category: "weapons", price: 80, requiredOrder: 0, attack: 8, attackSpeed: .03, critRate: 0, lifeSteal: 0 }),
+  jade_sword: Object.freeze({ category: "weapons", price: 260, requiredOrder: 1, attack: 22, attackSpeed: .08, critRate: .05, lifeSteal: 0 }),
+  blood_sabre: Object.freeze({ category: "weapons", price: 620, requiredOrder: 2, attack: 48, attackSpeed: .12, critRate: .10, lifeSteal: .06 }),
+  heaven_blade: Object.freeze({ category: "weapons", price: 1500, requiredOrder: 3, faction:"orthodox", attack: 95, attackSpeed: .20, critRate: .18, lifeSteal: .10 }),
+  celestial_path_sword: Object.freeze({ category: "weapons", price: 980, requiredOrder: 2, faction: "orthodox", attack: 58, attackSpeed: .16, critRate: .12, lifeSteal: 0 }),
+  blood_path_saber: Object.freeze({ category: "weapons", price: 1040, requiredOrder: 2, faction: "demonic", attack: 64, attackSpeed: .11, critRate: .09, lifeSteal: .10 }),
+  nether_path_twinblades: Object.freeze({ category: "weapons", price: 920, requiredOrder: 2, faction: "heretic", attack: 52, attackSpeed: .22, critRate: .17, lifeSteal: .03 }),
+  spirit_robe: Object.freeze({ category: "armor", price: 110, requiredOrder: 0, defense: 7, maxMana: 12 }),
+  jade_armor: Object.freeze({ category: "armor", price: 380, requiredOrder: 1, defense: 20, maxMana: 28 }),
+  dragon_armor: Object.freeze({ category: "armor", price: 900, requiredOrder: 2, defense: 45, maxMana: 50 }),
   healing_pill: Object.freeze({ category: "consumables", price: 35, requiredOrder: 0, healAmount: 45 }),
   mana_pill: Object.freeze({ category: "consumables", price: 40, requiredOrder: 0, manaAmount: 40 }),
-  spirit_charm: Object.freeze({ category: "accessory", price: 120, requiredOrder: 1 }),
-  thunder_guard_talisman: Object.freeze({ category: "accessory", price: 780, requiredOrder: 1, bossDrop: true }),
+  spirit_charm: Object.freeze({ category: "accessory", price: 120, requiredOrder: 1, defense: 5 }),
+  thunder_guard_talisman: Object.freeze({ category: "accessory", price: 780, requiredOrder: 1, defense: 18, critRate: .08, bossDrop: true }),
+  celestial_sword_set: Object.freeze({ category: "armor", price: 540, requiredOrder: 1, faction: "orthodox", attack: 16, defense: 18, maxMana: 24 }),
+  blood_lord_set: Object.freeze({ category: "armor", price: 540, requiredOrder: 1, faction: "demonic", attack: 20, defense: 14, lifeSteal: .04 }),
+  nether_venom_set: Object.freeze({ category: "armor", price: 540, requiredOrder: 1, faction: "heretic", attack: 15, defense: 15, critRate: .05 }),
+  orthodox_stream_sword:Object.freeze({category:"weapons",price:420,requiredOrder:1,faction:"orthodox",attack:32,attackSpeed:.12,critRate:.07,lifeSteal:0}),
+  orthodox_dipper_sword:Object.freeze({category:"weapons",price:1850,requiredOrder:3,faction:"orthodox",attack:108,attackSpeed:.22,critRate:.18,lifeSteal:0}),
+  orthodox_supreme_sword:Object.freeze({category:"weapons",price:5200,requiredOrder:4,faction:"orthodox",attack:190,attackSpeed:.28,critRate:.25,lifeSteal:.04}),
+  demonic_soul_saber:Object.freeze({category:"weapons",price:450,requiredOrder:1,faction:"demonic",attack:36,attackSpeed:.09,critRate:.05,lifeSteal:.06}),
+  demonic_inferno_scythe:Object.freeze({category:"weapons",price:1950,requiredOrder:3,faction:"demonic",attack:116,attackSpeed:.16,critRate:.15,lifeSteal:.12}),
+  demonic_blood_emperor:Object.freeze({category:"weapons",price:5500,requiredOrder:4,faction:"demonic",attack:205,attackSpeed:.20,critRate:.20,lifeSteal:.18}),
+  heretic_scale_sword:Object.freeze({category:"weapons",price:400,requiredOrder:1,faction:"heretic",attack:29,attackSpeed:.15,critRate:.10,lifeSteal:.02}),
+  heretic_spider_blades:Object.freeze({category:"weapons",price:1780,requiredOrder:3,faction:"heretic",attack:98,attackSpeed:.28,critRate:.24,lifeSteal:.05}),
+  heretic_plague_staff:Object.freeze({category:"weapons",price:4900,requiredOrder:4,faction:"heretic",attack:174,attackSpeed:.23,critRate:.28,lifeSteal:.08}),
+  orthodox_cloud_robe:Object.freeze({category:"armor",price:460,requiredOrder:1,faction:"orthodox",defense:24,maxMana:32}),
+  orthodox_star_armor:Object.freeze({category:"armor",price:2100,requiredOrder:3,faction:"orthodox",attack:28,defense:68,maxMana:65}),
+  orthodox_infinite_robe:Object.freeze({category:"armor",price:5800,requiredOrder:4,faction:"orthodox",attack:52,defense:118,maxMana:100}),
+  demonic_blood_armor:Object.freeze({category:"armor",price:480,requiredOrder:1,faction:"demonic",defense:27,lifeSteal:.04}),
+  demonic_ninehell_armor:Object.freeze({category:"armor",price:2250,requiredOrder:3,faction:"demonic",attack:34,defense:74,lifeSteal:.08}),
+  demonic_emperor_robe:Object.freeze({category:"armor",price:6200,requiredOrder:4,faction:"demonic",attack:62,defense:125,lifeSteal:.12}),
+  heretic_bone_robe:Object.freeze({category:"armor",price:440,requiredOrder:1,faction:"heretic",defense:22,critRate:.06,maxMana:20}),
+  heretic_spider_armor:Object.freeze({category:"armor",price:1980,requiredOrder:3,faction:"heretic",attack:25,defense:62,critRate:.13}),
+  heretic_saint_robe:Object.freeze({category:"armor",price:5400,requiredOrder:4,faction:"heretic",attack:47,defense:105,critRate:.20,maxMana:70}),
 });
 
+function equipmentStats(equipment = {}, faction = "orthodox") {
+  const items = Object.values(equipment).map(id => {
+    const catalog=SHOP_CATALOG[id];
+    const variant=itemForFaction(id,faction);
+    return catalog&&variant?{...catalog,...variant}:catalog;
+  }).filter(Boolean);
+  return items.reduce((total,item)=>({
+    attack: total.attack + (item.atkBonus ?? item.attack ?? 0),
+    attackSpeed: total.attackSpeed + (item.attackSpeed ?? 0),
+    critRate: total.critRate + (item.critRate ?? 0),
+    lifeSteal: total.lifeSteal + (item.lifeSteal ?? 0),
+    defense: total.defense + (item.defense ?? 0),
+    maxMana: total.maxMana + (item.maxMana ?? 0),
+  }),{attack:0,attackSpeed:0,critRate:0,lifeSteal:0,defense:0,maxMana:0});
+}
+
+export function playerGrowthForLevel(level = 1) {
+  const safeLevel = clamp(Math.floor(finiteNumber(level, 1)), 1, 16);
+  return Object.freeze({
+    level: safeLevel,
+    maxHp: 120 + (safeLevel - 1) * 8,
+    maxMp: 100 + (safeLevel - 1) * 5,
+    attackMultiplier: Math.round((1 + (safeLevel - 1) * .05) * 1000) / 1000,
+    cultivationMultiplier: Math.round((1 + (safeLevel - 1) * .025) * 1000) / 1000,
+  });
+}
+
+function refreshEquipmentStats(player) {
+  const previousMaxHp = player.maxHp;
+  const previousMaxMp = player.maxMp;
+  const stats = equipmentStats(player.equipment,player.faction);
+  const growth = playerGrowthForLevel(player.cultivationSystem.level);
+  player.maxHp = growth.maxHp;
+  player.maxMp = growth.maxMp + stats.maxMana;
+  player.hp = clamp(player.hp + Math.max(0, player.maxHp - previousMaxHp), 0, player.maxHp);
+  player.mp = clamp(player.mp + Math.max(0, player.maxMp - previousMaxMp), 0, player.maxMp);
+  return stats;
+}
+
 const balanced = (value, multiplier) => Math.round(value * multiplier * 100) / 100;
+
+export function monsterScaleForWave(wave = 1, level = 1, mapOrder = 0) {
+  const round = Math.max(1, Math.floor(finiteNumber(wave, 1)));
+  const stage = clamp(Math.floor(finiteNumber(level, 1)), 1, 5);
+  const map = Math.max(0, Math.floor(finiteNumber(mapOrder, 0)));
+  const roundStep = Math.min(24, round - 1);
+  return Object.freeze({
+    round,
+    level: stage,
+    mapOrder: map,
+    combatLevel: map * 5 + roundStep * 5 + stage,
+    hp: (1 + map * .9) * (1.62 ** roundStep) * (1 + (stage - 1) * .18),
+    damage: (1 + map * .58) * (1.4 ** roundStep) * (1 + (stage - 1) * .12),
+    speed: Math.min(1.75, (1 + map * .055) * (1 + roundStep * .018) * (1 + (stage - 1) * .012)),
+    reward: (1 + map * .62) * (1.3 ** roundStep) * (1 + (stage - 1) * .1),
+  });
+}
 
 export const ENEMY_TEMPLATES = Object.freeze({
   spirit_fox: Object.freeze({
@@ -229,23 +318,16 @@ const ENEMY_SPAWNS = Object.freeze([
   Object.freeze({ id: "boss-1", type: "fallen_guardian", x: 0, y: 0, z: -31 }),
 ]);
 
-const STARTING_REALM = Object.freeze({
-  id: "foundation",
-  name: "Trúc Cơ hậu kỳ",
-  order: 2,
-});
-
-const GOLDEN_CORE_REALM = Object.freeze({
-  id: "golden_core",
-  name: "Kim Đan sơ kỳ",
-  order: 3,
-});
+const realmSnapshot = cultivationSystem => {
+  const realm = realmForLevel(cultivationSystem.level);
+  return Object.freeze({ id: realm.id, name: cultivationSystem.displayName, order: realm.order });
+};
 
 const FAST_TRAVEL_REGIONS = Object.freeze({
-  sect_hall: Object.freeze({ requiredOrder: 1, portal: { x: 0, y: 0, z: 26 }, townGate: { x: 0, y: 0, z: 26 } }),
-  luoyang: Object.freeze({ requiredOrder: 2, portal: { x: 28, y: 0, z: -8 }, townGate: { x: 25, y: 0, z: -5 } }),
-  spirit_mine: Object.freeze({ requiredOrder: 2, portal: { x: 18, y: 0, z: 34 }, townGate: { x: 16, y: 0, z: 31 } }),
-  heaven_sect: Object.freeze({ requiredOrder: 3, portal: { x: -30, y: 0, z: -18 }, townGate: { x: -27, y: 0, z: -16 } }),
+  sect_hall: Object.freeze({ requiredOrder: 0, mapOrder: 0, portal: { x: 0, y: 0, z: 26 }, townGate: { x: 0, y: 0, z: 26 } }),
+  luoyang: Object.freeze({ requiredOrder: 1, mapOrder: 1, portal: { x: 28, y: 0, z: -8 }, townGate: { x: 25, y: 0, z: -5 } }),
+  spirit_mine: Object.freeze({ requiredOrder: 1, mapOrder: 2, portal: { x: 18, y: 0, z: 34 }, townGate: { x: 16, y: 0, z: 31 } }),
+  heaven_sect: Object.freeze({ requiredOrder: 2, mapOrder: 3, portal: { x: -30, y: 0, z: -18 }, townGate: { x: -27, y: 0, z: -16 } }),
 });
 
 function gameError(code, message) {
@@ -336,14 +418,14 @@ function clampPosition(position, canFly = false) {
 
 export function sanitizeRoomCode(value) {
   const roomCode = String(value ?? "")
-    .normalize("NFKC")
-    .toUpperCase()
-    .replace(/[^A-Z0-9-]/g, "")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 12);
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}_\- ]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 24)
+    .trim();
   if (roomCode.length < 3) {
-    throw gameError("INVALID_ROOM", "Mã phòng phải có từ 3 đến 12 ký tự A-Z, 0-9 hoặc dấu gạch ngang.");
+    throw gameError("INVALID_ROOM", "Tục Danh phải có từ 3 đến 24 ký tự tiếng Việt, chữ số hoặc khoảng trắng.");
   }
   return roomCode;
 }
@@ -404,12 +486,48 @@ function sanitizeSession(value) {
     const id = equipmentSource[slot];
     if (inventory.includes(id) && slotFor(id) === slot) equipment[slot] = id;
   }
+  const resources = isObject(source.resources) ? source.resources : {};
+  const currentRegion = Object.hasOwn(FAST_TRAVEL_REGIONS, source.currentRegion) ? source.currentRegion : "sect_hall";
+  const position = isObject(source.position) ? clampPosition(source.position, Boolean(source.flightUnlocked)) : null;
+  const breakthroughSource = isObject(source.breakthrough) ? source.breakthrough : {};
+  const breakthroughStatus = ["idle", "active", "resolving", "failed"].includes(breakthroughSource.status)
+    ? breakthroughSource.status
+    : "idle";
   return {
     gold: clamp(Math.floor(finiteNumber(source.gold)), 0, 1_000_000_000),
     inventory,
     equipment,
     cultivationSystem: isObject(source.cultivationSystem) ? source.cultivationSystem : {},
+    skillSystem: isObject(source.skillSystem) ? source.skillSystem : null,
+    currentRegion,
+    position,
+    hp: clamp(finiteNumber(source.hp, 120), 0, 10_000),
+    mp: clamp(finiteNumber(source.mp, 100), 0, 10_000),
+    alive: source.alive !== false,
+    flightUnlocked: Boolean(source.flightUnlocked),
+    resources: {
+      linhThach: clamp(Math.floor(finiteNumber(resources.linhThach)), 0, 1_000_000),
+      linhThao: clamp(Math.floor(finiteNumber(resources.linhThao)), 0, 1_000_000),
+      linhCot: clamp(Math.floor(finiteNumber(resources.linhCot)), 0, 1_000_000),
+      hoTamDan: clamp(Math.floor(finiteNumber(resources.hoTamDan)), 0, 1_000),
+    },
+    breakthrough: {
+      status: breakthroughStatus,
+      wave: clamp(Math.floor(finiteNumber(breakthroughSource.wave)), 0, 3),
+      startedAt: Math.max(0, finiteNumber(breakthroughSource.startedAt)),
+      nextAt: Math.max(0, finiteNumber(breakthroughSource.nextAt)),
+      telegraph: isObject(breakthroughSource.telegraph) ? {
+        position: clampPosition(breakthroughSource.telegraph.position),
+        radius: clamp(finiteNumber(breakthroughSource.telegraph.radius, 3), 1, 8),
+        resolveAt: Math.max(0, finiteNumber(breakthroughSource.telegraph.resolveAt)),
+      } : null,
+    },
   };
+}
+
+function sanitizeResumeToken(value) {
+  const token = String(value ?? "").trim();
+  return /^[A-Za-z0-9_-]{20,128}$/.test(token) ? token : null;
 }
 
 export function isInSafeZone(position) {
@@ -427,19 +545,33 @@ function isAtBreakthroughAltar(position) {
 
 function createPlayer(id, identity, spawn, now) {
   const session = sanitizeSession(identity?.session);
-  const cultivationSystem = new CultivationSystem(session.cultivationSystem, { baseEXP: 100, realmMultiplier: 1.5 });
+  const cultivationSystem = new CultivationSystem(session.cultivationSystem, { baseEXP: CULTIVATION_BASE_EXP, realmMultiplier: CULTIVATION_REALM_MULTIPLIER });
+  const faction = sanitizeFaction(identity?.faction);
+  const skillSystem = new SkillSystemManager({
+    faction,
+    realmId: cultivationSystem.realmId,
+    minorLevel: cultivationSystem.subStage,
+    state: session.skillSystem,
+  });
+  skillSystem.applyCultivationLevel(cultivationSystem.level);
+  const realm = realmSnapshot(cultivationSystem);
+  const gearStats = equipmentStats(session.equipment,faction);
+  const growth = playerGrowthForLevel(cultivationSystem.level);
+  const maxHp = growth.maxHp;
+  const maxMp = growth.maxMp + gearStats.maxMana;
+  const alive = session.alive && session.hp > 0;
   return {
     id,
     name: sanitizeName(identity?.name),
-    faction: sanitizeFaction(identity?.faction),
+    faction,
     profile: sanitizeProfile(identity?.profile),
-    position: copyPosition(spawn),
+    position: copyPosition(session.position ?? spawn),
     yaw: Math.PI,
     sequence: 0,
-    hp: 120,
-    maxHp: 120,
-    mp: 100,
-    maxMp: 100,
+    hp: alive ? clamp(session.hp, 1, maxHp) : 0,
+    maxHp,
+    mp: clamp(session.mp, 0, maxMp),
+    maxMp,
     // Legacy qi fields mirror the active EXP system. They are no longer a
     // second capped progression track.
     qi: cultivationSystem.currentExp,
@@ -447,44 +579,64 @@ function createPlayer(id, identity, spawn, now) {
     shopInventory: [...session.inventory],
     equipment: { ...session.equipment },
     cultivationSystem,
-    currentRegion: 'sect_hall',
+    skillSystem,
+    currentRegion: session.currentRegion,
     maxQi: cultivationSystem.requiredEXP,
     shield: 0,
     shieldUntil: 0,
     blocking: false,
     parryUntil: 0,
-    alive: true,
+    alive,
     respawnAt: 0,
     meditating: false,
     isFlying: false,
-    flightUnlocked: false,
-    realm: { ...STARTING_REALM },
-    inventory: {
-      linhThach: 0,
-      linhThao: 0,
-      linhCot: 0,
-      hoTamDan: 0,
-    },
+    flightUnlocked: session.flightUnlocked && realm.order >= 3,
+    realm: { ...realm },
+    inventory: { ...session.resources },
     cooldowns: Object.create(null),
     lastMoveAt: now,
     movementCredit: 0.65,
     invulnerableUntil: 0,
-    breakthrough: {
-      status: "idle",
-      wave: 0,
-      startedAt: 0,
-      nextAt: 0,
-      telegraph: null,
-    },
+    breakthrough: session.breakthrough,
   };
 }
 
-function createEnemy(spawn) {
+function applyEnemyWave(enemy, defeats = 0) {
+  const template = ENEMY_TEMPLATES[enemy.type];
+  const killCount = Math.max(0, Math.floor(finiteNumber(defeats, 0)));
+  const roundNumber = Math.floor(killCount / 5) + 1;
+  const stage = killCount % 5 + 1;
+  const scale = monsterScaleForWave(roundNumber, stage, enemy.mapOrder);
+  const typeOffset = Object.keys(ENEMY_TEMPLATES).indexOf(enemy.type);
+  enemy.defeats = killCount;
+  enemy.wave = scale.round;
+  enemy.level = scale.level;
+  enemy.combatLevel = scale.combatLevel;
+  enemy.spriteVariant = ((Math.max(0, typeOffset) + enemy.mapOrder + scale.round + scale.level - 2) % 3 + 3) % 3;
+  enemy.powerScale = scale.damage;
+  enemy.label = `${template.label} · Vòng ${scale.round} Cấp ${scale.level}`;
+  enemy.maxHp = balanced(template.maxHp, scale.hp);
+  enemy.hp = enemy.maxHp;
+  enemy.speed = balanced(template.speed, scale.speed);
+  enemy.damage = balanced(template.damage, scale.damage);
+  enemy.attackRange = template.attackRange;
+  enemy.aggroRange = template.aggroRange;
+  enemy.attackCooldownMs = Math.max(700, Math.round(template.attackCooldownMs / scale.speed));
+  enemy.respawnMs = Math.max(2_500, Math.round(template.respawnMs / Math.min(1.65, scale.speed)));
+  enemy.reward = Object.fromEntries(Object.entries(template.reward).map(([key, value]) => [key,
+    key === "qi" || key === "gold" ? Math.max(1, Math.round(value * scale.reward)) : value,
+  ]));
+  return enemy;
+}
+
+function createEnemy(spawn, regionId = "sect_hall", mapOrder = 0) {
   const template = ENEMY_TEMPLATES[spawn.type];
   const position = { x: spawn.x, y: spawn.y, z: spawn.z };
-  return {
-    id: spawn.id,
+  return applyEnemyWave({
+    id: regionId === "sect_hall" ? spawn.id : `${regionId}-${spawn.id}`,
     type: spawn.type,
+    regionId,
+    mapOrder,
     label: template.label,
     isBoss: Boolean(template.isBoss),
     spawn: copyPosition(position),
@@ -500,8 +652,9 @@ function createEnemy(spawn) {
     attackCount: 0,
     slowUntil: 0,
     stunnedUntil: 0,
+    dotEffects: [],
     contributors: new Set(),
-  };
+  }, 0);
 }
 
 function serializeCooldowns(cooldowns, now) {
@@ -531,6 +684,8 @@ function serializeBreakthrough(breakthrough) {
 
 function serializePublicPlayer(player, now) {
   const cultivation = player.cultivationSystem.serialize();
+  const gear = equipmentStats(player.equipment,player.faction);
+  const growth = playerGrowthForLevel(player.cultivationSystem.level);
   return {
     id: player.id,
     name: player.name,
@@ -548,6 +703,9 @@ function serializePublicPlayer(player, now) {
     maxHp: player.maxHp,
     mp: Math.floor(player.mp),
     maxMp: player.maxMp,
+    baseAtk: round(ABILITIES.basic.damage * growth.attackMultiplier, 2),
+    totalAtk: round(ABILITIES.basic.damage * growth.attackMultiplier + gear.attack, 2),
+    cultivationMultiplier: growth.cultivationMultiplier,
     qi: cultivation.currentExp,
     gold: Math.floor(player.gold),
     equipment: { ...player.equipment },
@@ -577,6 +735,13 @@ function serializeEnemy(enemy) {
     id: enemy.id,
     type: enemy.type,
     label: enemy.label,
+    wave: enemy.wave,
+    level: enemy.level,
+    spriteVariant: enemy.spriteVariant,
+    powerScale: enemy.powerScale,
+    regionId: enemy.regionId,
+    mapOrder: enemy.mapOrder,
+    combatLevel: enemy.combatLevel,
     isBoss: enemy.isBoss,
     position: {
       x: round(enemy.position.x),
@@ -615,7 +780,10 @@ export class GameRoom {
     );
     this.random = typeof options.random === "function" ? options.random : Math.random;
     this.players = new Map();
-    this.enemies = new Map(ENEMY_SPAWNS.map((spawn) => [spawn.id, createEnemy(spawn)]));
+    const regionEnemies = Object.entries(FAST_TRAVEL_REGIONS).flatMap(([regionId, region]) =>
+      ENEMY_SPAWNS.map((spawn) => createEnemy(spawn, regionId, region.mapOrder)),
+    );
+    this.enemies = new Map(regionEnemies.map((enemy) => [enemy.id, enemy]));
     this.events = [];
     this.lastTickAt = null;
     this.emptySince = Date.now();
@@ -673,12 +841,10 @@ export class GameRoom {
       throw gameError("INVALID_MOVE", "Dữ liệu di chuyển không hợp lệ.");
     }
 
-    const flightRequested = Boolean(payload.flying);
-    const canFly = player.flightUnlocked && player.breakthrough.status === "idle";
-    player.isFlying = flightRequested && canFly;
-    const requested = clampPosition(payload.position, player.isFlying);
+    player.isFlying = false;
+    const requested = clampPosition(payload.position, false);
     const elapsedSeconds = clamp((now - player.lastMoveAt) / 1_000, 0, 0.25);
-    const baseSpeed = player.isFlying ? 11 : 7.2;
+    const baseSpeed = 7.2;
     // A capped token bucket tolerates small reconciliation corrections without
     // granting extra speed to clients that spam movement packets.
     player.movementCredit = Math.min(1, player.movementCredit + baseSpeed * elapsedSeconds);
@@ -686,7 +852,7 @@ export class GameRoom {
     const accepted = moveTowards(player.position, requested, maximumDistance);
     const movedDistance = distance3(player.position, accepted);
 
-    player.position = clampPosition(accepted, player.isFlying);
+    player.position = clampPosition(accepted, false);
     player.movementCredit = Math.max(0, player.movementCredit - movedDistance);
     player.yaw = normalizeYaw(payload.yaw ?? player.yaw);
     player.lastMoveAt = now;
@@ -718,7 +884,7 @@ export class GameRoom {
       y: player.position.y,
       z: player.position.z + direction.z * 4.4,
     };
-    player.position = clampPosition(destination, player.isFlying && player.flightUnlocked);
+    player.position = clampPosition(destination, false);
     player.meditating = false;
     player.blocking = false;
     player.cooldowns.dash = now + 1_200;
@@ -740,8 +906,39 @@ export class GameRoom {
 
     const rawKey = String(payload.ability ?? payload.key ?? "");
     const key = rawKey.toLowerCase() === "basic" ? "basic" : rawKey.toUpperCase();
-    const ability = ABILITIES[key];
-    if (!ability) throw gameError("UNKNOWN_ABILITY", "Chiêu thức không tồn tại.");
+    let skill = null;
+    let ability = ABILITIES.basic;
+    if (key !== "basic") {
+      const slot = key.toLowerCase();
+      skill = player.skillSystem.skillForSlot(slot);
+      if (!skill) throw gameError("SKILL_NOT_EQUIPPED", `Ô ${key} chưa được gán kỹ năng.`);
+      if (payload.skillId && payload.skillId !== skill.id) throw gameError("SKILL_MISMATCH", "Kỹ năng client không khớp trạng thái máy chủ.");
+      const legacyTargetMode = key === "G" ? "around-self"
+        : key === "E" || (key === "F" && player.faction === "demonic") ? "area"
+        : (skill.shield || skill.heal || skill.speed || skill.stealth) && !skill.damage ? "self"
+        : "single";
+      const targetMode = skill.targetMode ?? legacyTargetMode;
+      ability = {
+        key,
+        label: skill.name,
+        cooldownMs: Math.round(skill.cooldown * 1_000),
+        mpCost: skill.manaCost,
+        damage: Number(skill.damage) || 0,
+        heal: Number(skill.heal) || 0,
+        shield: Number(skill.shield) || 0,
+        shieldMs: 5_000,
+        range: Number.isFinite(Number(skill.range)) ? Number(skill.range) : key === "Q" ? 14 : key === "R" ? 11 : key === "F" ? 7 : 9,
+        radius: Number.isFinite(Number(skill.radius)) ? Number(skill.radius) : key === "G" ? 13 : 4.3,
+        targetMode,
+        slowMs: Math.max(Number(skill.control) || 0, 0) * 1_000,
+        controlMs: Math.max(Number(skill.control) || 0, 0) * 1_000,
+        dotDamage: Math.max(Number(skill.dot) || 0, 0),
+        lifeSteal: Math.max(Number(skill.lifeSteal) || 0, 0),
+      };
+    }
+
+    const gear = equipmentStats(player.equipment,player.faction);
+    ability = { ...ability, cooldownMs: Math.round(ability.cooldownMs * (1 - Math.min(.35, gear.attackSpeed))) };
 
     const readyAt = player.cooldowns[key] ?? 0;
     if (readyAt > now) throw gameError("ON_COOLDOWN", `${ability.label} chưa hồi chiêu.`);
@@ -761,22 +958,40 @@ export class GameRoom {
       ? player.equipment.weapon
       : null;
     const weaponBonus = weaponId ? WEAPON_ATTACK_BONUSES[weaponId] : 0;
-    const attackDamage = Math.max(0, finiteNumber(ability.damage) + weaponBonus);
+    const equipmentAttack = Math.max(0, gear.attack);
+    const levelDamage = key === "basic"
+      ? finiteNumber(ability.damage) * playerGrowthForLevel(player.cultivationSystem.level).attackMultiplier
+      : finiteNumber(ability.damage);
+    const attackDamage = Math.max(0, levelDamage + equipmentAttack);
     const combatAbility = { ...ability, damage: attackDamage };
     if (player.faction === "orthodox") combatAbility.range = ability.range * 1.25;
     if (player.faction === "demonic" && ability.targetMode === "area") combatAbility.radius = ability.radius * 1.35;
     if (player.faction === "heretic" && key !== "basic") combatAbility.slowMs = Math.max(ability.slowMs ?? 0, 3000);
     if (ability.targetMode === "self") {
-      player.hp = Math.min(player.maxHp, player.hp + ability.heal);
-      player.shield = Math.max(player.shield, ability.shield);
-      player.shieldUntil = now + ability.shieldMs;
+      player.hp = Math.min(player.maxHp, player.hp + (ability.heal ?? 0));
+      player.shield = Math.max(player.shield, ability.shield ?? 0);
+      if (ability.shield) player.shieldUntil = now + (ability.shieldMs ?? 0);
+      if (skill?.speed || skill?.stealth) {
+        const direction = normalizeHorizontalDirection(payload.aim, player.yaw);
+        player.position = clampPosition({
+          x: player.position.x + direction.x * 3.2,
+          y: player.position.y,
+          z: player.position.z + direction.z * 3.2,
+        }, player.isFlying);
+        player.invulnerableUntil = Math.max(player.invulnerableUntil, now + Math.round((skill.stealth ?? 0.3) * 1_000));
+      }
     } else {
       const targets = this.selectAbilityTargets(player, combatAbility, aim, payload.targetId);
       for (const enemy of targets) {
-        if (player.faction === "orthodox" && ["basic", "Q", "E"].includes(key)) {
-          for (let strike = 0; strike < 3; strike += 1) this.damageEnemy(enemy, attackDamage * 0.46, player, now + strike * 35, combatAbility);
-        } else this.damageEnemy(enemy, player.faction === "heretic" ? attackDamage * 1.12 : attackDamage, player, now, combatAbility);
-        if (player.faction === "demonic") player.hp = Math.min(player.maxHp, player.hp + attackDamage * 0.14);
+        const critical = gear.critRate > 0 && this.random() < Math.min(.75,gear.critRate);
+        const resolvedDamage = attackDamage * (critical ? 1.6 : 1);
+        let dealt = 0;
+        if (player.faction === "orthodox" && (key === "basic" || ["sword_intent", "myriad_swords"].includes(skill?.id))) {
+          for (let strike = 0; strike < 3; strike += 1) dealt += this.damageEnemy(enemy, resolvedDamage * 0.46, player, now + strike * 35, combatAbility);
+        } else dealt = this.damageEnemy(enemy, player.faction === "heretic" ? resolvedDamage * 1.12 : resolvedDamage, player, now, combatAbility);
+        if (combatAbility.dotDamage > 0 && enemy.alive) this.applyDamageOverTime(enemy,player,combatAbility.dotDamage,now);
+        const lifeSteal = Math.min(.6,gear.lifeSteal + combatAbility.lifeSteal + (player.faction === "demonic" ? .14 : 0));
+        if (lifeSteal > 0) player.hp = Math.min(player.maxHp,player.hp+dealt*lifeSteal);
         hitIds.push(enemy.id);
       }
     }
@@ -784,14 +999,47 @@ export class GameRoom {
     this.pushEvent("ability:cast", {
       playerId: id,
       ability: key,
+      skillId: skill?.id ?? "basic",
       aim,
       targetId: typeof payload.targetId === "string" ? payload.targetId : null,
       hitIds,
       faction: player.faction,
       weaponId,
-      totalAtk: ABILITIES.basic.damage + weaponBonus,
+      totalAtk: attackDamage,
     }, now);
-    return { ability: key, hitIds, player: serializePublicPlayer(player, now) };
+    return { ability: key, skillId: skill?.id ?? "basic", hitIds, player: serializePublicPlayer(player, now) };
+  }
+
+  updateSkill(id, payload = {}, now = Date.now()) {
+    const player = this.requirePlayer(id);
+    if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể điều chỉnh tâm pháp khi đã tử vong.");
+    if (player.breakthrough.status !== "idle") throw gameError("ACTION_BLOCKED", "Không thể điều chỉnh tâm pháp trong lúc độ kiếp.");
+    const action = String(payload.action ?? "");
+    const skillId = typeof payload.skillId === "string" ? payload.skillId : "";
+    const slot = typeof payload.slot === "string" ? payload.slot.toLowerCase() : "";
+    let changed = false;
+    let spentGold = 0;
+    if (action === "unlock") {
+      const skill = player.skillSystem.getSkill(skillId);
+      if (!skill) throw gameError("INVALID_SKILL_ACTION", "Chiêu thức không tồn tại trên con đường tu hành này.");
+      if (player.skillSystem.lastCultivationLevel < skill.requiredLevel) {
+        throw gameError("SKILL_LEVEL_REQUIRED", `Cần đạt cấp ${skill.requiredLevel} mới có thể mở ${skill.name}.`);
+      }
+      const requiredRealm = CULTIVATION_REALMS.find(realm => realm.id === skill.requiredRealm) ?? realmForLevel(skill.requiredLevel);
+      if (player.cultivationSystem.realm.order < requiredRealm.order) {
+        throw gameError("SKILL_REALM_REQUIRED", `Cần đạt tu vi ${requiredRealm.name} mới có thể mở ${skill.name}.`);
+      }
+      if (!player.skillSystem.canUnlock(skillId)) throw gameError("INVALID_SKILL_ACTION", "Chưa đủ điều kiện hoặc điểm mở khóa chiêu.");
+      spentGold = Math.max(0, Math.floor(Number(skill.unlockCost) || 0));
+      if (player.gold < spentGold) throw gameError("NOT_ENOUGH_GOLD", `Cần ${spentGold} vàng để lĩnh ngộ ${skill.name}.`);
+      changed = player.skillSystem.unlock(skillId);
+      if (changed) player.gold -= spentGold;
+    } else if (action === "upgrade") changed = player.skillSystem.upgrade(skillId);
+    else if (action === "assign") changed = player.skillSystem.assign(slot, skillId);
+    else if (action === "remove") changed = player.skillSystem.unassign(slot);
+    if (!changed) throw gameError("INVALID_SKILL_ACTION", "Không thể thực hiện thay đổi kỹ năng này.");
+    this.pushEvent("skill:updated", { playerId: id, action, skillId, slot, spentGold, gold: player.gold }, now);
+    return { player: serializePublicPlayer(player, now), skillSystem: player.skillSystem.serialize(), shopSystem: this.economySnapshot(player) };
   }
 
   setBlocking(id, active, now = Date.now()) {
@@ -813,7 +1061,10 @@ export class GameRoom {
   }
 
   selectAbilityTargets(player, ability, aim, requestedTargetId) {
-    const livingEnemies = [...this.enemies.values()].filter((enemy) => enemy.alive);
+    const livingEnemies = [...this.enemies.values()].filter((enemy) => enemy.alive && enemy.regionId === player.currentRegion);
+    const requestedTarget = typeof requestedTargetId === "string"
+      ? livingEnemies.find((enemy) => enemy.id === requestedTargetId)
+      : null;
     if (ability.targetMode === "around-self") {
       return livingEnemies.filter(
         (enemy) => horizontalDistance(player.position, enemy.position) <= ability.radius,
@@ -821,12 +1072,22 @@ export class GameRoom {
     }
 
     if (ability.targetMode === "area") {
-      const center = pointFromAim(player.position, aim, ability.range * 0.72);
+      const requestedDistance = requestedTarget ? horizontalDistance(player.position, requestedTarget.position) : Infinity;
+      const center = requestedTarget && requestedDistance <= ability.range + ability.radius
+        ? requestedTarget.position
+        : pointFromAim(player.position, aim, ability.range * 0.72);
       return livingEnemies.filter(
         (enemy) =>
           horizontalDistance(player.position, enemy.position) <= ability.range + ability.radius &&
           horizontalDistance(center, enemy.position) <= ability.radius,
       );
+    }
+
+    // A deliberate target lock is authoritative as long as the enemy is in
+    // range. It must not miss merely because mouse/facing packets arrived one
+    // frame apart from the cast packet.
+    if (requestedTarget && horizontalDistance(player.position, requestedTarget.position) <= ability.range) {
+      return [requestedTarget];
     }
 
     const candidates = livingEnemies
@@ -849,12 +1110,20 @@ export class GameRoom {
   syncCultivationFields(player) {
     player.qi = player.cultivationSystem.currentExp;
     player.maxQi = player.cultivationSystem.requiredEXP;
+    player.realm = { ...realmSnapshot(player.cultivationSystem) };
+    player.skillSystem.applyCultivationLevel(player.cultivationSystem.level);
+    refreshEquipmentStats(player);
     return player.cultivationSystem.serialize();
   }
 
   grantCultivationEXP(player, amount, source = "unknown") {
     const before = player.cultivationSystem.serialize();
-    const result = player.cultivationSystem.addEXP(amount);
+    // The prototype's authored boss trial gates Trúc Cơ -> Kim Đan. EXP may
+    // fill Trúc Cơ tầng 2, but only the authoritative tribulation crosses it.
+    const difficulty = 1 + Math.max(0, player.cultivationSystem.level - 4) * 0.10;
+    const adjustedAmount = Math.max(0, finiteNumber(amount)) / difficulty;
+    const progressionCap = progressionCapForLevel(player.cultivationSystem.level);
+    const result = player.cultivationSystem.addEXP(adjustedAmount, { maxLevel: progressionCap });
     const cultivationSystem = this.syncCultivationFields(player);
     return {
       ...result,
@@ -862,7 +1131,18 @@ export class GameRoom {
       before,
       cultivationSystem,
       awarded: result.gained,
+      requested: Math.max(0, finiteNumber(amount)),
+      difficulty,
     };
+  }
+
+  applyDamageOverTime(enemy, player, totalDamage, now = Date.now()) {
+    const damage = Math.max(0, finiteNumber(totalDamage));
+    if (!enemy?.alive || !player?.alive || damage <= 0) return false;
+    enemy.dotEffects = enemy.dotEffects.filter(effect => effect.playerId !== player.id).slice(-7);
+    enemy.dotEffects.push({ playerId: player.id, damagePerTick: damage / 3, ticksRemaining: 3, nextAt: now + 1_000 });
+    this.pushEvent("enemy:afflicted", { enemyId: enemy.id, playerId: player.id, effect: "poison", durationMs: 3_000 }, now);
+    return true;
   }
 
   damageEnemy(enemy, rawDamage, player, now = Date.now(), ability = {}) {
@@ -874,6 +1154,7 @@ export class GameRoom {
     enemy.contributors.add(player.id);
     enemy.stunnedUntil = Math.max(enemy.stunnedUntil, now + MONSTER_BALANCE.hitStunMs);
     if (ability.slowMs) enemy.slowUntil = Math.max(enemy.slowUntil, now + ability.slowMs);
+    if (ability.controlMs) enemy.stunnedUntil = Math.max(enemy.stunnedUntil, now + ability.controlMs);
     this.grantCultivationEXP(player, damage * 0.08, "combat-damage");
     this.pushEvent("enemy:damaged", {
       enemyId: enemy.id,
@@ -886,12 +1167,12 @@ export class GameRoom {
   }
 
   defeatEnemy(enemy, killer, now = Date.now()) {
-    const template = ENEMY_TEMPLATES[enemy.type];
     enemy.alive = false;
     enemy.hp = 0;
     enemy.targetId = null;
     enemy.pendingAttack = null;
-    enemy.respawnAt = now + template.respawnMs;
+    enemy.dotEffects = [];
+    enemy.respawnAt = now + enemy.respawnMs;
 
     const recipients = enemy.isBoss
       ? [...enemy.contributors].filter((id) => this.players.has(id))
@@ -902,7 +1183,12 @@ export class GameRoom {
       const player = this.players.get(playerId);
       if (!player) continue;
       const granted = {};
-      for (const [resource, amount] of Object.entries(template.reward)) {
+      const overLevel = Math.max(0, player.cultivationSystem.level - enemy.combatLevel);
+      const rewardFactor = 1 / (1 + overLevel * .24);
+      for (const [resource, rawAmount] of Object.entries(enemy.reward)) {
+        const amount = resource === "qi" || resource === "gold"
+          ? Math.max(1, Math.round(rawAmount * rewardFactor))
+          : rawAmount;
         if (resource === "qi") {
           const expResult = this.grantCultivationEXP(player, amount, "enemy-defeated");
           // Keep qi for older clients, while exp is the canonical reward field.
@@ -926,7 +1212,15 @@ export class GameRoom {
         granted.bossEquipment = "thunder_guard_talisman";
         if (!player.shopInventory.includes(granted.bossEquipment)) player.shopInventory.push(granted.bossEquipment);
       }
+      const upgradeDropChance = enemy.isBoss ? .08 : .025;
+      if (this.random() < upgradeDropChance) {
+        player.skillSystem.skillUpgradePoints += 1;
+        granted.skillUpgradePoints = 1;
+        granted.totalSkillUpgradePoints = player.skillSystem.skillUpgradePoints;
+      }
+      granted.totalGold = Math.floor(player.gold);
       granted.cultivationSystem = this.syncCultivationFields(player);
+      granted.skillSystem = player.skillSystem.serialize();
       this.pushEvent("loot:granted", { playerId, enemyId: enemy.id, loot: granted }, now);
     }
 
@@ -959,23 +1253,14 @@ export class GameRoom {
   startBreakthrough(id, now = Date.now()) {
     const player = this.requirePlayer(id);
     if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể đột phá khi đang trọng thương.");
-    if (player.breakthrough.status !== "idle") {
+    if (!["idle", "failed"].includes(player.breakthrough.status)) {
       throw gameError("BREAKTHROUGH_ACTIVE", "Đột phá đã bắt đầu.");
     }
-    if (player.realm.id !== STARTING_REALM.id) {
-      throw gameError("REALM_COMPLETE", "Nhân vật đã bước vào Kim Đan kỳ.");
-    }
-    if (!isAtBreakthroughAltar(player.position)) {
-      throw gameError("NOT_AT_ALTAR", "Hãy đứng trong Trận Đài Đột Phá tại Tông Môn.");
-    }
+    const gate = tribulationGateForLevel(player.cultivationSystem.level);
+    if (!gate) throw gameError("REALM_REQUIRED", "Chỉ cần độ kiếp khi đột phá lên Nguyên Anh hoặc Hóa Thần.");
     if (player.qi < player.maxQi) {
       throw gameError("NOT_ENOUGH_QI", `Cần tích đủ ${player.maxQi} Chân Khí.`);
     }
-    if (player.inventory.hoTamDan < 1) {
-      throw gameError("MISSING_PILL", "Cần Hộ Tâm Đan rơi từ Lôi Linh Hộ Pháp.");
-    }
-
-    player.inventory.hoTamDan -= 1;
     player.qi = 0;
     player.meditating = false;
     player.isFlying = false;
@@ -986,10 +1271,12 @@ export class GameRoom {
       startedAt: now,
       nextAt: now + 700,
       telegraph: null,
+      targetLevel: gate.toLevel,
+      targetRealmId: gate.targetRealmId,
     };
     this.pushEvent("breakthrough:started", {
       playerId: id,
-      waves: 3,
+      waves: BREAKTHROUGH_WAVES,
       nextWaveAt: player.breakthrough.nextAt,
     }, now);
     return serializePublicPlayer(player, now);
@@ -1025,7 +1312,7 @@ export class GameRoom {
       return;
     }
 
-    if (!state.telegraph && state.wave < 3 && now >= state.nextAt) {
+    if (!state.telegraph && state.wave < BREAKTHROUGH_WAVES && now >= state.nextAt) {
       state.wave += 1;
       const jitterAngle = this.random() * Math.PI * 2;
       const jitterDistance = this.random() * 0.45;
@@ -1044,8 +1331,8 @@ export class GameRoom {
       };
       state.telegraph = {
         position: strikePosition,
-        radius: 2.55 + state.wave * 0.2,
-        resolveAt: now + 900,
+        radius: 2.1 + state.wave * 0.15,
+        resolveAt: now + 1_200,
       };
       this.pushEvent("breakthrough:telegraph", {
         playerId: player.id,
@@ -1059,7 +1346,7 @@ export class GameRoom {
       const telegraph = state.telegraph;
       const hit = horizontalDistance(player.position, telegraph.position) <= telegraph.radius;
       if (hit) {
-        this.damagePlayer(player, 34, { kind: "lightning", id: `tribulation-${state.wave}` }, now);
+        this.damagePlayer(player, 18, { kind: "lightning", id: `tribulation-${state.wave}` }, now);
       }
       this.pushEvent("breakthrough:strike", {
         playerId: player.id,
@@ -1071,7 +1358,7 @@ export class GameRoom {
       state.telegraph = null;
 
       if (!player.alive) return;
-      if (state.wave >= 3) {
+      if (state.wave >= BREAKTHROUGH_WAVES) {
         state.status = "resolving";
         state.nextAt = now + 550;
       } else {
@@ -1081,17 +1368,16 @@ export class GameRoom {
   }
 
   completeBreakthrough(player, now) {
-    player.realm = { ...GOLDEN_CORE_REALM };
-    player.flightUnlocked = true;
-    player.maxHp = 150;
+    const gate = tribulationGateForLevel(player.cultivationSystem.level);
+    if (!gate) return this.failBreakthrough(player, "invalid-realm-gate", now);
+    player.cultivationSystem.sync({ level: gate.toLevel, currentExp: 0, baseEXP: CULTIVATION_BASE_EXP, realmMultiplier: CULTIVATION_REALM_MULTIPLIER, version: 3 });
+    refreshEquipmentStats(player);
     player.hp = player.maxHp;
-    player.maxMp = 125;
     player.mp = player.maxMp;
-    player.maxQi = 150;
-    player.qi = 25;
+    this.syncCultivationFields(player);
     player.breakthrough = {
       status: "idle",
-      wave: 3,
+      wave: BREAKTHROUGH_WAVES,
       startedAt: 0,
       nextAt: 0,
       telegraph: null,
@@ -1099,7 +1385,9 @@ export class GameRoom {
     this.pushEvent("breakthrough:success", {
       playerId: player.id,
       realm: { ...player.realm },
-      flightUnlocked: true,
+      cultivationSystem: player.cultivationSystem.serialize(),
+      skillSystem: player.skillSystem.serialize(),
+      targetRealmId: gate.targetRealmId,
     }, now);
   }
 
@@ -1121,6 +1409,17 @@ export class GameRoom {
       if (now >= enemy.respawnAt) this.respawnEnemy(enemy, now);
       return;
     }
+    for (const effect of [...enemy.dotEffects]) {
+      while (enemy.alive && effect.ticksRemaining > 0 && now >= effect.nextAt) {
+        const owner = this.players.get(effect.playerId);
+        if (!owner) { effect.ticksRemaining = 0; break; }
+        this.damageEnemy(enemy, effect.damagePerTick, owner, effect.nextAt, { key: "poison-dot" });
+        effect.ticksRemaining -= 1;
+        effect.nextAt += 1_000;
+      }
+    }
+    enemy.dotEffects = enemy.dotEffects.filter(effect => effect.ticksRemaining > 0);
+    if (!enemy.alive) return;
     if (this.players.size === 0) {
       enemy.targetId = null;
       enemy.pendingAttack = null;
@@ -1144,7 +1443,7 @@ export class GameRoom {
     if (!target) {
       const homeDistance = horizontalDistance(enemy.position, enemy.spawn);
       if (homeDistance > 0.1) {
-        enemy.position = moveTowards(enemy.position, enemy.spawn, template.speed * deltaSeconds);
+        enemy.position = moveTowards(enemy.position, enemy.spawn, enemy.speed * deltaSeconds);
       }
       return;
     }
@@ -1153,8 +1452,8 @@ export class GameRoom {
     const dx = target.position.x - enemy.position.x;
     const dz = target.position.z - enemy.position.z;
     enemy.yaw = Math.atan2(dx, dz);
-    const effectiveSpeed = template.speed * (enemy.slowUntil > now ? 0.52 : 1);
-    if (distance > template.attackRange * 0.9) {
+    const effectiveSpeed = enemy.speed * (enemy.slowUntil > now ? 0.52 : 1);
+    if (distance > enemy.attackRange * 0.9) {
       const destination = { x: target.position.x, y: 0, z: target.position.z };
       enemy.position = clampPosition(
         moveTowards(enemy.position, destination, effectiveSpeed * deltaSeconds),
@@ -1162,7 +1461,7 @@ export class GameRoom {
       );
     }
 
-    if (distance <= template.attackRange && now >= enemy.nextAttackAt) {
+    if (distance <= enemy.attackRange && now >= enemy.nextAttackAt) {
       if (enemy.isBoss) {
         this.telegraphBossAttack(enemy, target, now);
       } else {
@@ -1175,9 +1474,10 @@ export class GameRoom {
     return Boolean(
       target &&
         target.alive &&
+        target.currentRegion === enemy.regionId &&
         !isInSafeZone(target.position) &&
         target.breakthrough.status === "idle" &&
-        horizontalDistance(enemy.spawn, target.position) <= template.aggroRange * 1.55,
+        horizontalDistance(enemy.spawn, target.position) <= enemy.aggroRange * 1.55,
     );
   }
 
@@ -1185,9 +1485,9 @@ export class GameRoom {
     let nearest = null;
     let nearestDistance = Infinity;
     for (const player of this.players.values()) {
-      if (!player.alive || isInSafeZone(player.position) || player.breakthrough.status !== "idle") continue;
+      if (!player.alive || player.currentRegion !== enemy.regionId || isInSafeZone(player.position) || player.breakthrough.status !== "idle") continue;
       const distance = horizontalDistance(enemy.position, player.position);
-      if (distance <= template.aggroRange && distance < nearestDistance) {
+      if (distance <= enemy.aggroRange && distance < nearestDistance) {
         nearest = player;
         nearestDistance = distance;
       }
@@ -1196,10 +1496,10 @@ export class GameRoom {
   }
 
   telegraphEnemyAttack(enemy,target,now){
-    const template=ENEMY_TEMPLATES[enemy.type],profile=monsterAttackFor(enemy.type);
-    const attack={type:profile.type,vfx:profile.vfx,kind:profile.kind,targetId:target.id,origin:copyPosition(enemy.position),position:{...copyPosition(target.position),y:0},radius:profile.radius,damage:template.damage,resolveAt:now+profile.windupMs};
+    const profile=monsterAttackFor(enemy.type);
+    const attack={type:profile.type,vfx:profile.vfx,kind:profile.kind,targetId:target.id,origin:copyPosition(enemy.position),position:{...copyPosition(target.position),y:0},radius:profile.radius,damage:enemy.damage,resolveAt:now+profile.windupMs};
     enemy.pendingAttack=attack;
-    enemy.nextAttackAt=attack.resolveAt+template.attackCooldownMs;
+    enemy.nextAttackAt=attack.resolveAt+enemy.attackCooldownMs;
     this.pushEvent("enemy:telegraph",{enemyId:enemy.id,targetId:target.id,attack:attack.type,vfx:attack.vfx,kind:attack.kind,origin:copyPosition(attack.origin),position:copyPosition(attack.position),radius:attack.radius,resolveAt:attack.resolveAt},now);
   }
 
@@ -1214,11 +1514,11 @@ export class GameRoom {
       origin: copyPosition(enemy.position),
       position: isNova ? copyPosition(enemy.position) : { ...copyPosition(target.position), y: 0 },
       radius: isNova ? 5.4 : 3.1,
-      damage: isNova ? 25 : 19,
+      damage: balanced(isNova ? 25 : 19, enemy.powerScale),
       resolveAt: now + (isNova ? 1_100 : 850),
     };
     enemy.pendingAttack = attack;
-    enemy.nextAttackAt = attack.resolveAt + ENEMY_TEMPLATES[enemy.type].attackCooldownMs;
+    enemy.nextAttackAt = attack.resolveAt + enemy.attackCooldownMs;
     this.pushEvent("enemy:telegraph", {
       enemyId: enemy.id,
       targetId: target.id,
@@ -1266,6 +1566,8 @@ export class GameRoom {
       return 0;
     }
     let damage = clamp(finiteNumber(rawDamage), 0, 10_000);
+    const defense = equipmentStats(player.equipment,player.faction).defense;
+    if (defense > 0) damage *= 100 / (100 + defense);
     if (player.blocking) {
       const perfectParry = source?.kind !== "lightning" && now <= player.parryUntil;
       if (perfectParry) {
@@ -1350,9 +1652,8 @@ export class GameRoom {
   }
 
   respawnEnemy(enemy, now) {
-    const template = ENEMY_TEMPLATES[enemy.type];
     enemy.position = copyPosition(enemy.spawn);
-    enemy.hp = template.maxHp;
+    applyEnemyWave(enemy, (enemy.defeats ?? 0) + 1);
     enemy.alive = true;
     enemy.respawnAt = 0;
     enemy.targetId = null;
@@ -1361,6 +1662,7 @@ export class GameRoom {
     enemy.attackCount = 0;
     enemy.slowUntil = 0;
     enemy.stunnedUntil = 0;
+    enemy.dotEffects = [];
     enemy.contributors.clear();
     this.pushEvent("enemy:respawned", { enemyId: enemy.id, position: copyPosition(enemy.position) }, now);
   }
@@ -1396,12 +1698,13 @@ export class GameRoom {
     const player = this.requirePlayer(id), item = SHOP_CATALOG[itemId];
     if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể giao dịch khi đã tử vong.");
     if (!item || item.bossDrop) throw gameError("UNKNOWN_ITEM", "Vật phẩm không tồn tại trong cửa hàng.");
+    if (item.faction && item.faction !== player.faction) throw gameError("FACTION_REQUIRED", "Trang bị này thuộc con đường tu hành khác.");
     if (player.cultivationSystem.realm.order < item.requiredOrder) throw gameError("REALM_REQUIRED", "Cảnh giới chưa đủ để mua vật phẩm.");
     if (player.gold < item.price) throw gameError("NOT_ENOUGH_GOLD", "Không đủ vàng.");
     if (item.category !== "consumables" && player.shopInventory.includes(itemId)) throw gameError("ALREADY_OWNED", "Đã sở hữu vật phẩm này.");
     player.gold -= item.price;
     player.shopInventory.push(itemId);
-    if (item.category === "weapons" && !player.equipment.weapon) player.equipment.weapon = itemId;
+    if (item.category === "weapons" && !player.equipment.weapon) { player.equipment.weapon = itemId; refreshEquipmentStats(player); }
     this.pushEvent("shop:updated", { playerId: id, action: "buy", itemId, gold: player.gold }, now);
     return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
   }
@@ -1413,6 +1716,7 @@ export class GameRoom {
     player.shopInventory.splice(index, 1);
     player.gold += Math.floor(item.price * 0.55);
     for (const slot of Object.keys(player.equipment)) if (player.equipment[slot] === itemId) player.equipment[slot] = null;
+    refreshEquipmentStats(player);
     this.pushEvent("shop:updated", { playerId: id, action: "sell", itemId, gold: player.gold }, now);
     return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
   }
@@ -1421,10 +1725,23 @@ export class GameRoom {
     const player = this.requirePlayer(id), item = SHOP_CATALOG[itemId];
     if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể thay trang bị khi đã tử vong.");
     if (!item || !player.shopInventory.includes(itemId)) throw gameError("ITEM_NOT_OWNED", "Không sở hữu vật phẩm này.");
+    if (item.faction && item.faction !== player.faction) throw gameError("FACTION_REQUIRED", "Trang bị này không phù hợp con đường tu hành hiện tại.");
     const slot = item.category === "weapons" ? "weapon" : item.category === "armor" ? "armor" : item.category === "accessory" ? "accessory" : null;
     if (!slot) throw gameError("ITEM_NOT_EQUIPPABLE", "Vật phẩm này không thể trang bị.");
     player.equipment[slot] = itemId;
+    refreshEquipmentStats(player);
     this.pushEvent("shop:updated", { playerId: id, action: "equip", itemId, gold: player.gold }, now);
+    return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
+  }
+
+  unequipItem(id, itemId, now = Date.now()) {
+    const player = this.requirePlayer(id);
+    if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể tháo trang bị khi đã tử vong.");
+    const slot = Object.keys(player.equipment).find((key) => player.equipment[key] === itemId);
+    if (!slot) throw gameError("ITEM_NOT_EQUIPPED", "Vật phẩm này chưa được trang bị.");
+    player.equipment[slot] = null;
+    refreshEquipmentStats(player);
+    this.pushEvent("shop:updated", { playerId: id, action: "unequip", itemId, gold: player.gold }, now);
     return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
   }
 
@@ -1464,6 +1781,27 @@ export class GameRoom {
         inventory: [...player.shopInventory],
         equipment: { ...player.equipment },
       },
+      skillSystem: player.skillSystem.serialize(),
+      resources: { ...player.inventory },
+    };
+  }
+
+  exportPlayerSession(id) {
+    const player = this.requirePlayer(id);
+    return {
+      gold: player.gold,
+      inventory: [...player.shopInventory],
+      equipment: { ...player.equipment },
+      cultivationSystem: player.cultivationSystem.serialize(),
+      skillSystem: player.skillSystem.serialize(),
+      currentRegion: player.currentRegion,
+      position: copyPosition(player.position),
+      hp: player.hp,
+      mp: player.mp,
+      alive: player.alive,
+      flightUnlocked: player.flightUnlocked,
+      resources: { ...player.inventory },
+      breakthrough: serializeBreakthrough(player.breakthrough),
     };
   }
 }
@@ -1476,8 +1814,15 @@ export class GameWorld {
       MAX_PLAYERS_PER_ROOM,
     );
     this.random = typeof options.random === "function" ? options.random : Math.random;
+    this.allowClientSession = Boolean(options.allowClientSession);
+    this.onSessionChange = typeof options.onSessionChange === "function" ? options.onSessionChange : () => {};
     this.rooms = new Map();
     this.playerRooms = new Map();
+    this.tokenPlayers = new Map();
+    this.sessions = new Map(Object.entries(isObject(options.sessions) ? options.sessions : {}).map(([token,entry])=>[
+      token,
+      { state: isObject(entry?.state) ? entry.state : entry, savedAt: Math.max(0,finiteNumber(entry?.savedAt,Date.now())) },
+    ]));
   }
 
   getOrCreateRoom(rawCode) {
@@ -1500,7 +1845,17 @@ export class GameWorld {
 
     const previousCode = this.playerRooms.get(playerId);
     if (previousCode && previousCode !== code) this.leaveRoom(playerId, previousCode, now);
-    const player = destination.addPlayer(playerId, identity, now);
+    const resumeToken = sanitizeResumeToken(identity.resumeToken);
+    const activePlayerId = resumeToken ? this.tokenPlayers.get(resumeToken) : null;
+    if (activePlayerId && activePlayerId !== playerId) throw gameError("SESSION_IN_USE", "Nhân vật này đang hoạt động ở một kết nối khác.");
+    const cached = resumeToken ? this.sessions.get(resumeToken)?.state : null;
+    const authoritativeIdentity = {
+      ...identity,
+      session: cached ?? (this.allowClientSession ? identity.session : { gold: 100 }),
+    };
+    const player = destination.addPlayer(playerId, authoritativeIdentity, now);
+    player.resumeToken = resumeToken;
+    if (resumeToken) this.tokenPlayers.set(resumeToken, playerId);
     this.playerRooms.set(playerId, code);
     return { room: destination, player };
   }
@@ -1509,6 +1864,12 @@ export class GameWorld {
     const code = this.playerRooms.get(playerId);
     if (!code || (expectedCode && code !== expectedCode)) return false;
     const room = this.rooms.get(code);
+    const player = room?.players.get(playerId);
+    if (player?.resumeToken) {
+      this.sessions.set(player.resumeToken, { state: room.exportPlayerSession(playerId), savedAt: now });
+      this.onSessionChange();
+      this.tokenPlayers.delete(player.resumeToken);
+    }
     const removed = room?.removePlayer(playerId, now) ?? false;
     this.playerRooms.delete(playerId);
     return removed;
@@ -1523,12 +1884,23 @@ export class GameWorld {
     for (const room of this.rooms.values()) room.tick(now);
   }
 
+  checkpointSessions(now = Date.now()) {
+    for (const room of this.rooms.values()) for (const player of room.players.values()) {
+      if (player.resumeToken) this.sessions.set(player.resumeToken, { state: room.exportPlayerSession(player.id), savedAt: now });
+    }
+    this.onSessionChange();
+  }
+
+  serializeSessions() { return Object.fromEntries(this.sessions); }
+
   pruneEmptyRooms(now = Date.now(), ttlMs = EMPTY_ROOM_TTL_MS) {
     for (const [code, room] of this.rooms) {
       if (room.players.size === 0 && room.emptySince !== null && now - room.emptySince >= ttlMs) {
         this.rooms.delete(code);
       }
     }
+    const sessionTtlMs = 24 * 60 * 60 * 1_000;
+    let changed=false;for (const [token, session] of this.sessions) if (now - session.savedAt >= sessionTtlMs){this.sessions.delete(token);changed=true;}if(changed)this.onSessionChange();
   }
 
   stats() {

@@ -1,6 +1,7 @@
 import http from "node:http";
 import path from "node:path";
 import process from "node:process";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import express from "express";
@@ -145,6 +146,7 @@ function registerSocketHandlers(io, world, logger) {
             faction: payload?.faction,
             profile: payload?.profile,
             session: payload?.session,
+            resumeToken: payload?.resumeToken,
           },
           now,
         );
@@ -253,10 +255,21 @@ function registerSocketHandlers(io, world, logger) {
         const result = action === "buy" ? room.buyItem(socket.id, itemId, now)
           : action === "sell" ? room.sellItem(socket.id, itemId, now)
           : action === "equip" ? room.equipItem(socket.id, itemId, now)
+          : action === "unequip" ? room.unequipItem(socket.id, itemId, now)
           : action === "use" ? room.useItem(socket.id, itemId, now)
           : null;
         if (!result) { const error = new Error("Hành động vật phẩm không hợp lệ."); error.code = "INVALID_ITEM_ACTION"; throw error; }
         safeAck(ack, { ok: true, ...result });
+      } catch (error) {
+        reportSocketError(socket, error, ack, logger);
+      }
+    });
+
+    socket.on("skill:action", (payload = {}, ack) => {
+      try {
+        const room = currentRoom(world, socket);
+        if (!room) throw makeNotInRoomError();
+        safeAck(ack, { ok: true, ...room.updateSkill(socket.id, payload, Date.now()) });
       } catch (error) {
         reportSocketError(socket, error, ack, logger);
       }
@@ -339,7 +352,26 @@ export async function createGameServer(options = {}) {
     next();
   });
 
-  const world = options.world ?? new GameWorld({ maxPlayers: MAX_PLAYERS_PER_ROOM });
+  const sessionFile = options.sessionFile === false ? null : path.resolve(options.sessionFile ?? path.join(root, ".data", "sessions.json"));
+  let storedSessions = {};
+  if (sessionFile && !options.world) {
+    try { storedSessions = JSON.parse(await readFile(sessionFile, "utf8")); }
+    catch (error) { if (error?.code !== "ENOENT") logger.warn?.("Không thể đọc session save:", error); }
+  }
+  let world = options.world;
+  let sessionSaveTimer = null;
+  let sessionSavePromise = Promise.resolve();
+  let sessionPersistenceClosing = false;
+  const persistSessions = () => {
+    if (!sessionFile || options.world || sessionPersistenceClosing) return;
+    clearTimeout(sessionSaveTimer);
+    sessionSaveTimer = setTimeout(() => {
+      const snapshot = JSON.stringify(world.serializeSessions(), null, 2);
+      sessionSavePromise = sessionSavePromise.then(async () => { await mkdir(path.dirname(sessionFile), { recursive: true }); await writeFile(sessionFile, snapshot, "utf8"); }).catch(error => logger.error?.("Không thể lưu session:", error));
+    }, 150);
+    sessionSaveTimer.unref?.();
+  };
+  world ??= new GameWorld({ maxPlayers: MAX_PLAYERS_PER_ROOM, sessions: storedSessions, onSessionChange: persistSessions });
   app.get("/api/health", (_request, response) => {
     response.setHeader("Access-Control-Allow-Origin", "*");
     response.json({
@@ -379,16 +411,17 @@ export async function createGameServer(options = {}) {
   });
 
   const httpServer = http.createServer(app);
-  const allowedOrigin = process.env.CORS_ORIGIN
-    ? process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim())
-    : true;
-  const io = new SocketIOServer(httpServer, {
+  const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((origin) => origin.trim()).filter(Boolean)
+    : null;
+  const socketOptions = {
     serveClient: true,
     maxHttpBufferSize: 32 * 1024,
     pingInterval: 12_000,
     pingTimeout: 18_000,
-    cors: { origin: allowedOrigin, credentials: true },
-  });
+  };
+  if (allowedOrigins) socketOptions.cors = { origin: allowedOrigins, credentials: true };
+  const io = new SocketIOServer(httpServer, socketOptions);
   registerSocketHandlers(io, world, logger);
 
   const intervalMs = Math.round(1_000 / SIMULATION_HZ);
@@ -407,6 +440,7 @@ export async function createGameServer(options = {}) {
         }
       }
       world.pruneEmptyRooms(now);
+      if (now-(world.lastCheckpointAt??0)>=5_000){world.lastCheckpointAt=now;world.checkpointSessions(now);}
     } catch (error) {
       logger.error?.("Simulation tick failed", error);
     }
@@ -417,7 +451,15 @@ export async function createGameServer(options = {}) {
   async function close() {
     if (closed) return;
     closed = true;
+    sessionPersistenceClosing = true;
     clearInterval(simulationTimer);
+    clearTimeout(sessionSaveTimer);
+    world.checkpointSessions(Date.now());
+    if (sessionFile && !options.world) {
+      await mkdir(path.dirname(sessionFile), { recursive: true });
+      await writeFile(sessionFile, JSON.stringify(world.serializeSessions(), null, 2), "utf8");
+      await sessionSavePromise;
+    }
     await new Promise((resolve) => io.close(resolve));
     if (httpServer.listening) {
       await new Promise((resolve, reject) => {

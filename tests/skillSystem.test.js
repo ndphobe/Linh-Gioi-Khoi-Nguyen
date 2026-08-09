@@ -16,62 +16,110 @@ test('a loaded peak character remains tribulation-ready when EXP is capped',()=>
   assert.equal(result.tribulationReady,true);
 });
 
-test('three sects expose distinct five-skill trees', () => {
+test('three sects expose thirteen distinct skills and VFX per path', () => {
   assert.deepEqual(Object.keys(SECT_SKILL_TREES), ['orthodox', 'demonic', 'heretic']);
-  assert.equal(new Set(Object.values(SECT_SKILL_TREES).flat().map((skill) => skill.id)).size, 15);
+  const skills=Object.values(SECT_SKILL_TREES).flat();
+  assert.equal(skills.length,39);
+  assert.equal(new Set(skills.map((skill) => skill.id)).size,39);
+  assert.equal(new Set(skills.map((skill) => skill.vfx)).size,39);
+  assert.equal(new Set(skills.map((skill)=>JSON.stringify(skill.tiers))).size,39);
+  const basicVfx={orthodox:'swordWave',demonic:'bloodSlash',heretic:'venomBlade'};
+  for(const [faction,tree] of Object.entries(SECT_SKILL_TREES))assert.equal(tree.some(skill=>skill.vfx===basicVfx[faction]),false);
+});
+
+test('every sect starts with its entry skill equipped on Q',()=>{
+  for(const faction of Object.keys(SECT_SKILL_TREES)){
+    const manager=new SkillSystemManager({faction,realmId:'qi_refining',minorLevel:1});
+    assert.equal(manager.hotbar.q,SECT_SKILL_TREES[faction][0].id);
+    assert.equal(manager.skillForSlot('q').tier,1);
+    assert.equal(manager.unlockPoints,0);
+  }
+});
+
+test('restore rejects skills above the authoritative cultivation level',()=>{
+  const manager=new SkillSystemManager({faction:'orthodox',realmId:'qi_refining',minorLevel:1,state:{faction:'orthodox',pointVersion:4,skillUnlockPoints:99,unlocked:{sword_intent:1,primordial_sword:3},hotbar:{q:'primordial_sword'}}});
+  assert.equal(manager.unlocked.primordial_sword,undefined);
+  assert.equal(manager.hotbar.q,'sword_intent');
+  assert.equal(manager.canUnlock('jade_shield'),false);
 });
 
 test('unlock and upgrade currencies cannot be interchanged', () => {
-  const manager = new SkillSystemManager({ faction: 'orthodox', realmId: 'foundation', minorLevel: 4 });
+  const manager = new SkillSystemManager({ faction: 'orthodox', realmId: 'nascent_soul', minorLevel: 1 });
   assert.equal(manager.unlock('jade_shield'), true);
-  assert.equal(manager.unlockPoints, 0);
+  assert.equal(manager.unlockPoints, 4);
   assert.equal(manager.upgrade('jade_shield'), true);
   assert.equal(manager.unlocked.jade_shield, 2);
-  assert.equal(manager.assign('q', 'jade_shield'), true);
-  assert.equal(manager.skillForSlot('q').tier, 2);
+  assert.equal(manager.assign('e', 'jade_shield'), true);
+  assert.equal(manager.skillForSlot('e').tier, 2);
 });
 
-test('minor levels only award upgrades and major breakthroughs only award unlocks', () => {
+test('seven milestone levels award unlocks and remaining levels award upgrades', () => {
   const manager = new SkillSystemManager({ faction: 'demonic', realmId: 'qi_refining', minorLevel: 1 });
-  const subStage=manager.applyCultivationLevel(2);
-  assert.deepEqual({unlock:subStage.unlockAwarded,upgrade:subStage.upgradeAwarded},{unlock:0,upgrade:1});
-  assert.equal(manager.skillUnlockPoints,0);
+  const early=manager.applyCultivationLevel(5);
+  assert.deepEqual({unlock:early.unlockAwarded,upgrade:early.upgradeAwarded},{unlock:4,upgrade:0});
+  assert.equal(manager.skillUnlockPoints,4);
+  const sixth=manager.applyCultivationLevel(6);
+  assert.deepEqual({unlock:sixth.unlockAwarded,upgrade:sixth.upgradeAwarded},{unlock:1,upgrade:0});
+  const later=manager.applyCultivationLevel(7);
+  assert.deepEqual({unlock:later.unlockAwarded,upgrade:later.upgradeAwarded},{unlock:0,upgrade:1});
   assert.equal(manager.skillUpgradePoints,1);
-  const breakthrough=manager.applyCultivationLevel(3);
-  assert.deepEqual({unlock:breakthrough.unlockAwarded,upgrade:breakthrough.upgradeAwarded},{unlock:1,upgrade:0});
-  assert.equal(manager.skillUnlockPoints,1);
-  assert.equal(manager.skillUpgradePoints,1);
-  assert.deepEqual(manager.applyCultivationLevel(3),{unlockAwarded:0,upgradeAwarded:0,fromLevel:3,toLevel:3});
 });
 
-test('all sixteen cultivation levels award exactly four unlocks and eleven upgrades', () => {
+test('all sixteen cultivation levels award exactly seven unlocks and eight upgrades', () => {
   const manager = new SkillSystemManager({ faction: 'orthodox', realmId: 'qi_refining', minorLevel: 1 });
   const result = manager.applyCultivationLevel(16);
-  assert.equal(result.unlockAwarded,4);
-  assert.equal(result.upgradeAwarded,11);
+  assert.equal(result.unlockAwarded,7);
+  assert.equal(result.upgradeAwarded,8);
   assert.equal(manager.realmId,'spirit_transformation');
   assert.equal(manager.minorLevel,6);
 });
 
 test('skill panel exposes separate counters, unlock actions and plus upgrades',()=>{
-  const manager=new SkillSystemManager({faction:'orthodox',realmId:'foundation',minorLevel:1});
+  const manager=new SkillSystemManager({faction:'orthodox',realmId:'golden_core',minorLevel:2});
   let markup=skillTreePanelMarkup(manager);
-  assert.match(markup,/Điểm Mở Khóa Chiêu: <b>1<\/b>/);
-  assert.match(markup,/Điểm Nâng Cấp Chiêu: <b>1<\/b>/);
-  assert.match(markup,/>Mở Khóa<\/button>/);
-  assert.equal(manager.unlock('sword_intent'),true);
+  assert.match(markup,/Điểm Mở Khóa Chiêu: <b>5<\/b>/);
+  assert.match(markup,/Điểm Nâng Cấp Chiêu: <b>0<\/b>/);
+  assert.match(markup,/>Mở · 🪙 180<\/button>/);
+  assert.equal(manager.hotbar.q,'sword_intent');
   markup=skillTreePanelMarkup(manager);
   assert.match(markup,/class="skill-node__upgrade"[^>]*>\+<\/button>/);
 });
 
 test('hotbar bindings are unique and can be removed', () => {
   const manager = new SkillSystemManager({ faction: 'heretic', realmId: 'foundation', minorLevel: 3 });
-  manager.unlock('venom_dart');
+  assert.equal(manager.unassign('q'), true);
   assert.equal(manager.assign('q', 'venom_dart'), true);
+  assert.equal(manager.assign('e', 'venom_dart'), false);
+  assert.equal(manager.unassign('q'), true);
   assert.equal(manager.assign('e', 'venom_dart'), true);
-  assert.equal(manager.hotbar.q, null);
   assert.equal(manager.hotbar.e, 'venom_dart');
   assert.equal(manager.slotForSkill('venom_dart'), 'e');
   assert.equal(manager.unassign('e'), true);
   assert.equal(manager.hotbar.e, null);
+});
+
+test('legacy duplicate bindings are deduplicated in slot order',()=>{
+  const manager=new SkillSystemManager({faction:'orthodox',realmId:'foundation',minorLevel:1,state:{faction:'orthodox',unlocked:{sword_intent:1},hotbar:{q:'sword_intent',e:'sword_intent'},pointVersion:2}});
+  assert.equal(manager.hotbar.q,'sword_intent');
+  assert.equal(manager.hotbar.e,null);
+});
+
+test('authoritative restore clears removed slots so a skill can be rebound',()=>{
+  const manager=new SkillSystemManager({faction:'orthodox',realmId:'foundation',minorLevel:1});
+  manager.restore({faction:'orthodox',unlocked:{sword_intent:1,myriad_swords:1},hotbar:{q:'sword_intent',e:'myriad_swords'},pointVersion:3,lastCultivationLevel:4});
+  manager.restore({faction:'orthodox',unlocked:{sword_intent:1,myriad_swords:1},hotbar:{q:'sword_intent',e:null},pointVersion:3,lastCultivationLevel:4});
+  assert.equal(manager.hotbar.e,null);
+  assert.equal(manager.slotForSkill('myriad_swords'),null);
+  assert.equal(manager.assign('r','myriad_swords'),true);
+  assert.equal(manager.hotbar.r,'myriad_swords');
+});
+
+test('skill panel distinguishes current, occupied and available slots',()=>{
+  const manager=new SkillSystemManager({faction:'orthodox',realmId:'foundation',minorLevel:1});
+  manager.unlock('myriad_swords');
+  const markup=skillTreePanelMarkup(manager);
+  assert.match(markup,/class="active"[^>]*disabled[^>]*>Q ✓<\/button>/);
+  assert.match(markup,/class="occupied"[^>]*disabled[^>]*>Q 🔒<\/button>/);
+  assert.match(markup,/class="available"[^>]*>E \+<\/button>/);
+  assert.match(markup,/Gỡ Kiếm Ý khỏi Q/);
 });

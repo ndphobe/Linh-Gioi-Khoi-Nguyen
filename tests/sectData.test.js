@@ -7,6 +7,7 @@ test('sects expose distinct palettes, sounds, mechanics and VFX',()=>{
   assert.equal(new Set(values.map(value=>value.primary)).size,3);
   assert.equal(new Set(values.map(value=>value.sound)).size,3);
   assert.equal(new Set(values.map(value=>value.vfx.g)).size,3);
+  assert.equal(new Set(values.flatMap(value=>Object.values(value.vfx))).size,18);
   assert.ok(SECT_COMBAT_DATA.orthodox.mechanics.parryShield);
   assert.ok(SECT_COMBAT_DATA.demonic.mechanics.lifeSteal);
   assert.ok(SECT_COMBAT_DATA.heretic.mechanics.poisonStacks);
