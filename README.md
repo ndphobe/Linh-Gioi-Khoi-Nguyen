@@ -1,4 +1,4 @@
-# Tu Tiên Truyền Kỳ — bản chơi thử online
+# Linh Giới Khởi Nguyên — bản chơi thử online
 
 Đây là **vertical slice** của ý tưởng game tu tiên hành động góc nhìn thứ ba trong GDD. Mục tiêu của bản này là chứng minh vòng lặp cốt lõi — vào phòng, điều khiển nhân vật, chiến đấu, tích tụ tu vi và vượt lôi kiếp từ **Trúc Cơ** lên **Kim Đan** — chứ chưa phải một MMORPG hoàn chỉnh.
 
