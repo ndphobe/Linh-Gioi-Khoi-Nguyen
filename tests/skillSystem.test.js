@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SECT_SKILL_TREES, SkillSystemManager, cooldownVisual } from '../src/game/SkillSystem.js';
+import { skillTreePanelMarkup } from '../src/game/UI/SkillTreePanel.js';
 
 test('cooldown visual exposes sweep angle and readable timer labels',()=>{
   assert.deepEqual(cooldownVisual(5,10),{remaining:5,total:10,ratio:.5,angle:180,label:'5.0s',coolingDown:true});
@@ -31,26 +32,36 @@ test('unlock and upgrade currencies cannot be interchanged', () => {
 });
 
 test('minor levels only award upgrades and major breakthroughs only award unlocks', () => {
-  const manager = new SkillSystemManager({ faction: 'demonic', realmId: 'foundation', minorLevel: 8 });
-  const unlocks = manager.unlockPoints;
-  assert.equal(manager.advanceMinor(), true);
-  assert.equal(manager.unlockPoints, unlocks);
-  manager.cultivationProgress = 100;
-  const upgrades = manager.upgradePoints;
-  assert.equal(manager.breakthrough('golden_core'), true);
-  assert.equal(manager.unlockPoints, unlocks + 1);
-  assert.equal(manager.upgradePoints, upgrades);
+  const manager = new SkillSystemManager({ faction: 'demonic', realmId: 'qi_refining', minorLevel: 1 });
+  const subStage=manager.applyCultivationLevel(2);
+  assert.deepEqual({unlock:subStage.unlockAwarded,upgrade:subStage.upgradeAwarded},{unlock:0,upgrade:1});
+  assert.equal(manager.skillUnlockPoints,0);
+  assert.equal(manager.skillUpgradePoints,1);
+  const breakthrough=manager.applyCultivationLevel(3);
+  assert.deepEqual({unlock:breakthrough.unlockAwarded,upgrade:breakthrough.upgradeAwarded},{unlock:1,upgrade:0});
+  assert.equal(manager.skillUnlockPoints,1);
+  assert.equal(manager.skillUpgradePoints,1);
+  assert.deepEqual(manager.applyCultivationLevel(3),{unlockAwarded:0,upgradeAwarded:0,fromLevel:3,toLevel:3});
 });
 
-test('cultivation advances minor realms and locks at peak for tribulation', () => {
-  const manager = new SkillSystemManager({ faction: 'orthodox', realmId: 'foundation', minorLevel: 1 });
-  const result = manager.gainCultivation(850);
-  assert.equal(result.levels, 8);
-  assert.equal(result.tribulationReady, false);
-  assert.equal(manager.minorLevel, 9);
-  assert.equal(manager.cultivationProgress, 50);
-  manager.gainCultivation(50);
-  assert.equal(manager.cultivationProgress, 100);
+test('all sixteen cultivation levels award exactly four unlocks and eleven upgrades', () => {
+  const manager = new SkillSystemManager({ faction: 'orthodox', realmId: 'qi_refining', minorLevel: 1 });
+  const result = manager.applyCultivationLevel(16);
+  assert.equal(result.unlockAwarded,4);
+  assert.equal(result.upgradeAwarded,11);
+  assert.equal(manager.realmId,'spirit_transformation');
+  assert.equal(manager.minorLevel,6);
+});
+
+test('skill panel exposes separate counters, unlock actions and plus upgrades',()=>{
+  const manager=new SkillSystemManager({faction:'orthodox',realmId:'foundation',minorLevel:1});
+  let markup=skillTreePanelMarkup(manager);
+  assert.match(markup,/Điểm Mở Khóa Chiêu: <b>1<\/b>/);
+  assert.match(markup,/Điểm Nâng Cấp Chiêu: <b>1<\/b>/);
+  assert.match(markup,/>Mở Khóa<\/button>/);
+  assert.equal(manager.unlock('sword_intent'),true);
+  markup=skillTreePanelMarkup(manager);
+  assert.match(markup,/class="skill-node__upgrade"[^>]*>\+<\/button>/);
 });
 
 test('hotbar bindings are unique and can be removed', () => {

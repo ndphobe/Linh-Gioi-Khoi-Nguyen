@@ -3196,9 +3196,10 @@ kbd {
 .skill-tree-card > header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--pixel-gold); }
 .skill-tree-card h2 { margin: 4px 0 14px; color: #f4ddb0; }
 .skill-tree-card header button { width: 42px; height: 42px; border: 2px solid var(--pixel-gold); color: #fff; font-size: 1.7rem; background: var(--pixel-red); cursor: pointer; }
-.skill-tree-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 14px 0; }
+.skill-tree-summary { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 14px 0; }
 .skill-tree-summary span { padding: 9px; border: 1px solid #58706f; background: #111c2a; }
 .skill-tree-summary b { color: #ffd977; }
+.skill-node__upgrade { min-width: 42px; min-height: 42px; padding: 0 !important; border-color: #d4ae55 !important; color: #fff0a0 !important; font-size: 24px !important; line-height: 1; }
 .skill-tree-grid { display: grid; gap: 10px; }
 .skill-node { display: grid; grid-template-columns: 55px minmax(0, 1fr) 105px 180px; gap: 12px; align-items: center; padding: 12px; border: 2px solid #425257; background: #101923; }
 .skill-node.locked { opacity: .62; filter: grayscale(.55); }
@@ -3262,6 +3263,21 @@ kbd {
 .player-panel.is-collapsed { width: 82px; grid-template-columns: 62px 0fr; padding-right: 9px; overflow: hidden; background: rgba(9,13,20,.58); }
 .player-panel.is-collapsed .player-details { visibility: hidden; opacity: 0; transform: translateX(-18px); pointer-events: none; }
 .player-panel.is-collapsed::after { display: none; }
+.player-panel.is-collapsed {
+  width: 392px;
+  grid-template-columns: 66px minmax(0, 1fr);
+  padding-right: 12px;
+  overflow: visible;
+  background: linear-gradient(180deg, rgba(25, 10, 9, 0.92), rgba(10, 6, 6, 0.87));
+}
+.player-panel.is-collapsed .player-details {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+.player-panel.is-collapsed::after { display: block; }
+.attack-power-tag b { color: #ffe177; text-shadow: 0 0 7px rgba(255, 193, 75, .72); }
 .objective-panel { z-index: 21; }
 .boss-panel { z-index: 23; }
 
@@ -3839,6 +3855,53 @@ input {
 
 .floating-number {
   text-shadow: 2px 2px 0 #090d14, -1px -1px 0 #183f60;
+}
+
+.death-dialog-overlay {
+  position: fixed;
+  z-index: 420;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle, rgba(75, 8, 19, .36), rgba(3, 5, 9, .94) 62%);
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+.death-dialog-overlay[hidden] { display: none; }
+.death-dialog-overlay.is-visible { opacity: 1; }
+
+.death-dialog {
+  position: relative;
+  width: min(560px, calc(100vw - 40px));
+  padding: 38px 34px 32px;
+  border: 3px solid #9c3041;
+  color: #eadfc7;
+  text-align: center;
+  background: linear-gradient(145deg, #17131a, #090b10 68%);
+  box-shadow: inset 0 0 0 3px #311820, 10px 10px 0 rgba(0, 0, 0, .72), 0 0 40px rgba(174, 26, 52, .24);
+  transform: translateY(12px) scale(.97);
+  transition: transform 180ms steps(4, end);
+}
+
+.death-dialog-overlay.is-visible .death-dialog { transform: translateY(0) scale(1); }
+.death-dialog::before, .death-dialog::after { content: '◆'; position: absolute; top: 12px; color: #a93245; }
+.death-dialog::before { left: 14px; }
+.death-dialog::after { right: 14px; }
+.death-dialog__seal { margin: 0 auto 10px; color: #d44a58; font-size: 42px; line-height: 1; text-shadow: 0 0 18px rgba(255, 37, 72, .65); }
+.death-dialog small { color: #a7835a; letter-spacing: .22em; }
+.death-dialog h2 { margin: 9px 0 10px; color: #f0d9bc; font-size: clamp(27px, 5vw, 42px); letter-spacing: .08em; text-shadow: 3px 3px 0 #561824; }
+.death-dialog p { margin: 0 0 28px; color: #c7b7a2; font-size: 16px; }
+.death-dialog__actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.death-dialog__actions button { min-height: 48px; border: 2px solid #78552f; color: #eadfc7; font: inherit; font-weight: 800; background: #231d1c; box-shadow: 4px 4px 0 #050608; cursor: pointer; }
+.death-dialog__actions button:last-child { border-color: #b43748; background: #4d1721; }
+.death-dialog__actions button:hover, .death-dialog__actions button:focus-visible { color: #fff2d4; filter: brightness(1.25); transform: translate(-1px, -1px); }
+.death-dialog__actions button:disabled { opacity: .55; cursor: wait; }
+
+@media (max-width: 560px) {
+  .death-dialog { padding: 30px 20px 24px; }
+  .death-dialog__actions { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

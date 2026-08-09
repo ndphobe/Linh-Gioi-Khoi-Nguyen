@@ -1,3 +1,6 @@
+import { CultivationSystem } from "../src/game/CultivationSystem.js";
+import { monsterAttackFor } from "../src/game/Monster.js";
+
 /**
  * Authoritative, renderer-agnostic simulation for the online vertical slice.
  *
@@ -125,6 +128,29 @@ export const MONSTER_BALANCE = Object.freeze({
   movementMultiplier: 0.78,
   detectionMultiplier: 0.72,
   hitStunMs: 480,
+});
+
+// Equipment bonuses are resolved from server-known IDs. The client may identify
+// its equipped weapon, but it cannot submit an arbitrary attack value.
+export const WEAPON_ATTACK_BONUSES = Object.freeze({
+  iron_sword: 8,
+  jade_sword: 22,
+  blood_sabre: 48,
+  heaven_blade: 95,
+});
+
+export const SHOP_CATALOG = Object.freeze({
+  iron_sword: Object.freeze({ category: "weapons", price: 80, requiredOrder: 0 }),
+  jade_sword: Object.freeze({ category: "weapons", price: 260, requiredOrder: 1 }),
+  blood_sabre: Object.freeze({ category: "weapons", price: 620, requiredOrder: 2 }),
+  heaven_blade: Object.freeze({ category: "weapons", price: 1500, requiredOrder: 3 }),
+  spirit_robe: Object.freeze({ category: "armor", price: 110, requiredOrder: 0 }),
+  jade_armor: Object.freeze({ category: "armor", price: 380, requiredOrder: 1 }),
+  dragon_armor: Object.freeze({ category: "armor", price: 900, requiredOrder: 2 }),
+  healing_pill: Object.freeze({ category: "consumables", price: 35, requiredOrder: 0, healAmount: 45 }),
+  mana_pill: Object.freeze({ category: "consumables", price: 40, requiredOrder: 0, manaAmount: 40 }),
+  spirit_charm: Object.freeze({ category: "accessory", price: 120, requiredOrder: 1 }),
+  thunder_guard_talisman: Object.freeze({ category: "accessory", price: 780, requiredOrder: 1, bossDrop: true }),
 });
 
 const balanced = (value, multiplier) => Math.round(value * multiplier * 100) / 100;
@@ -366,6 +392,26 @@ export function sanitizeProfile(value) {
   });
 }
 
+function sanitizeSession(value) {
+  const source = isObject(value) ? value : {};
+  const inventory = Array.isArray(source.inventory)
+    ? source.inventory.filter(id => typeof id === "string" && Object.hasOwn(SHOP_CATALOG, id)).slice(0, 60)
+    : [];
+  const equipmentSource = isObject(source.equipment) ? source.equipment : {};
+  const slotFor = id => SHOP_CATALOG[id]?.category === "weapons" ? "weapon" : SHOP_CATALOG[id]?.category === "armor" ? "armor" : SHOP_CATALOG[id]?.category === "accessory" ? "accessory" : null;
+  const equipment = { weapon: null, armor: null, accessory: null };
+  for (const slot of Object.keys(equipment)) {
+    const id = equipmentSource[slot];
+    if (inventory.includes(id) && slotFor(id) === slot) equipment[slot] = id;
+  }
+  return {
+    gold: clamp(Math.floor(finiteNumber(source.gold)), 0, 1_000_000_000),
+    inventory,
+    equipment,
+    cultivationSystem: isObject(source.cultivationSystem) ? source.cultivationSystem : {},
+  };
+}
+
 export function isInSafeZone(position) {
   return (
     position.x >= SAFE_ZONE.minX &&
@@ -380,6 +426,8 @@ function isAtBreakthroughAltar(position) {
 }
 
 function createPlayer(id, identity, spawn, now) {
+  const session = sanitizeSession(identity?.session);
+  const cultivationSystem = new CultivationSystem(session.cultivationSystem, { baseEXP: 100, realmMultiplier: 1.5 });
   return {
     id,
     name: sanitizeName(identity?.name),
@@ -392,10 +440,15 @@ function createPlayer(id, identity, spawn, now) {
     maxHp: 120,
     mp: 100,
     maxMp: 100,
-    qi: 0,
-    gold: 0,
+    // Legacy qi fields mirror the active EXP system. They are no longer a
+    // second capped progression track.
+    qi: cultivationSystem.currentExp,
+    gold: session.gold,
+    shopInventory: [...session.inventory],
+    equipment: { ...session.equipment },
+    cultivationSystem,
     currentRegion: 'sect_hall',
-    maxQi: 100,
+    maxQi: cultivationSystem.requiredEXP,
     shield: 0,
     shieldUntil: 0,
     blocking: false,
@@ -477,6 +530,7 @@ function serializeBreakthrough(breakthrough) {
 }
 
 function serializePublicPlayer(player, now) {
+  const cultivation = player.cultivationSystem.serialize();
   return {
     id: player.id,
     name: player.name,
@@ -494,12 +548,14 @@ function serializePublicPlayer(player, now) {
     maxHp: player.maxHp,
     mp: Math.floor(player.mp),
     maxMp: player.maxMp,
-    qi: Math.floor(player.qi),
+    qi: cultivation.currentExp,
     gold: Math.floor(player.gold),
+    equipment: { ...player.equipment },
+    cultivationSystem: cultivation,
     currentRegion: player.currentRegion,
-    maxQi: player.maxQi,
-    cultivation: Math.floor(player.qi),
-    cultivationRequired: player.maxQi,
+    maxQi: cultivation.requiredEXP,
+    cultivation: cultivation.currentExp,
+    cultivationRequired: cultivation.requiredEXP,
     shield: Math.ceil(player.shield),
     blocking: player.blocking,
     alive: player.alive,
@@ -536,6 +592,11 @@ function serializeEnemy(enemy) {
     pendingAttack: enemy.pendingAttack
       ? {
           type: enemy.pendingAttack.type,
+          attack: enemy.pendingAttack.type,
+          vfx: enemy.pendingAttack.vfx,
+          kind: enemy.pendingAttack.kind,
+          targetId: enemy.pendingAttack.targetId,
+          origin: copyPosition(enemy.pendingAttack.origin),
           position: copyPosition(enemy.pendingAttack.position),
           radius: enemy.pendingAttack.radius,
           resolveAt: enemy.pendingAttack.resolveAt,
@@ -694,7 +755,14 @@ export class GameRoom {
     player.yaw = Math.atan2(aim.x, aim.z);
 
     const hitIds = [];
-    const combatAbility = { ...ability };
+    // Equipment is server-authoritative. A client may request an attack, but it
+    // cannot forge a weapon bonus in the ability payload.
+    const weaponId = typeof player.equipment.weapon === "string" && player.equipment.weapon in WEAPON_ATTACK_BONUSES
+      ? player.equipment.weapon
+      : null;
+    const weaponBonus = weaponId ? WEAPON_ATTACK_BONUSES[weaponId] : 0;
+    const attackDamage = Math.max(0, finiteNumber(ability.damage) + weaponBonus);
+    const combatAbility = { ...ability, damage: attackDamage };
     if (player.faction === "orthodox") combatAbility.range = ability.range * 1.25;
     if (player.faction === "demonic" && ability.targetMode === "area") combatAbility.radius = ability.radius * 1.35;
     if (player.faction === "heretic" && key !== "basic") combatAbility.slowMs = Math.max(ability.slowMs ?? 0, 3000);
@@ -706,9 +774,9 @@ export class GameRoom {
       const targets = this.selectAbilityTargets(player, combatAbility, aim, payload.targetId);
       for (const enemy of targets) {
         if (player.faction === "orthodox" && ["basic", "Q", "E"].includes(key)) {
-          for (let strike = 0; strike < 3; strike += 1) this.damageEnemy(enemy, ability.damage * 0.46, player, now + strike * 35, combatAbility);
-        } else this.damageEnemy(enemy, player.faction === "heretic" ? ability.damage * 1.12 : ability.damage, player, now, combatAbility);
-        if (player.faction === "demonic") player.hp = Math.min(player.maxHp, player.hp + ability.damage * 0.14);
+          for (let strike = 0; strike < 3; strike += 1) this.damageEnemy(enemy, attackDamage * 0.46, player, now + strike * 35, combatAbility);
+        } else this.damageEnemy(enemy, player.faction === "heretic" ? attackDamage * 1.12 : attackDamage, player, now, combatAbility);
+        if (player.faction === "demonic") player.hp = Math.min(player.maxHp, player.hp + attackDamage * 0.14);
         hitIds.push(enemy.id);
       }
     }
@@ -720,6 +788,8 @@ export class GameRoom {
       targetId: typeof payload.targetId === "string" ? payload.targetId : null,
       hitIds,
       faction: player.faction,
+      weaponId,
+      totalAtk: ABILITIES.basic.damage + weaponBonus,
     }, now);
     return { ability: key, hitIds, player: serializePublicPlayer(player, now) };
   }
@@ -776,15 +846,35 @@ export class GameRoom {
     return candidates.length > 0 ? [candidates[0].enemy] : [];
   }
 
+  syncCultivationFields(player) {
+    player.qi = player.cultivationSystem.currentExp;
+    player.maxQi = player.cultivationSystem.requiredEXP;
+    return player.cultivationSystem.serialize();
+  }
+
+  grantCultivationEXP(player, amount, source = "unknown") {
+    const before = player.cultivationSystem.serialize();
+    const result = player.cultivationSystem.addEXP(amount);
+    const cultivationSystem = this.syncCultivationFields(player);
+    return {
+      ...result,
+      source,
+      before,
+      cultivationSystem,
+      awarded: result.gained,
+    };
+  }
+
   damageEnemy(enemy, rawDamage, player, now = Date.now(), ability = {}) {
     if (!enemy?.alive || !player?.alive || !this.players.has(player.id)) return 0;
-    const damage = clamp(finiteNumber(rawDamage), 0, 10_000);
+    // Overkill must not generate unlimited EXP. Only actual HP removed counts.
+    const damage = Math.min(enemy.hp, clamp(finiteNumber(rawDamage), 0, 10_000));
     if (damage <= 0) return 0;
     enemy.hp = Math.max(0, enemy.hp - damage);
     enemy.contributors.add(player.id);
     enemy.stunnedUntil = Math.max(enemy.stunnedUntil, now + MONSTER_BALANCE.hitStunMs);
     if (ability.slowMs) enemy.slowUntil = Math.max(enemy.slowUntil, now + ability.slowMs);
-    player.qi = Math.min(player.maxQi, player.qi + damage * 0.08);
+    this.grantCultivationEXP(player, damage * 0.08, "combat-damage");
     this.pushEvent("enemy:damaged", {
       enemyId: enemy.id,
       playerId: player.id,
@@ -814,9 +904,16 @@ export class GameRoom {
       const granted = {};
       for (const [resource, amount] of Object.entries(template.reward)) {
         if (resource === "qi") {
-          const before = player.qi;
-          player.qi = Math.min(player.maxQi, player.qi + amount);
-          granted.qi = round(player.qi - before);
+          const expResult = this.grantCultivationEXP(player, amount, "enemy-defeated");
+          // Keep qi for older clients, while exp is the canonical reward field.
+          // Both contain the full drop and never become zero because a legacy
+          // meter happened to be full.
+          granted.exp = round(expResult.awarded);
+          granted.qi = granted.exp;
+          granted.expResult = {
+            levels: expResult.levels,
+            breakthroughs: expResult.breakthroughs,
+          };
         } else if (resource === "gold") {
           player.gold += amount;
           granted.gold = amount;
@@ -825,7 +922,11 @@ export class GameRoom {
           granted[resource] = amount;
         }
       }
-      if (enemy.isBoss) granted.bossEquipment = "thunder_guard_talisman";
+      if (enemy.isBoss) {
+        granted.bossEquipment = "thunder_guard_talisman";
+        if (!player.shopInventory.includes(granted.bossEquipment)) player.shopInventory.push(granted.bossEquipment);
+      }
+      granted.cultivationSystem = this.syncCultivationFields(player);
       this.pushEvent("loot:granted", { playerId, enemyId: enemy.id, loot: granted }, now);
     }
 
@@ -904,16 +1005,13 @@ export class GameRoom {
   }
 
   tickPlayer(player, deltaSeconds, now) {
-    if (!player.alive) {
-      if (player.respawnAt > 0 && now >= player.respawnAt) this.respawnPlayer(player, now);
-      return;
-    }
+    if (!player.alive) return;
 
     if (player.shield > 0 && now >= player.shieldUntil) player.shield = 0;
     player.mp = Math.min(player.maxMp, player.mp + deltaSeconds * (player.meditating ? 14 : 3.5));
     if (player.meditating) {
       player.hp = Math.min(player.maxHp, player.hp + deltaSeconds * 5);
-      player.qi = Math.min(player.maxQi, player.qi + deltaSeconds * 8);
+      this.grantCultivationEXP(player, deltaSeconds * 8, "meditation");
     }
     this.tickBreakthrough(player, now);
   }
@@ -1068,16 +1166,7 @@ export class GameRoom {
       if (enemy.isBoss) {
         this.telegraphBossAttack(enemy, target, now);
       } else {
-        this.damagePlayer(enemy.targetId ? target : null, template.damage, {
-          kind: enemy.type === "rogue_cultivator" ? "projectile" : "melee",
-          id: enemy.id,
-        }, now);
-        enemy.nextAttackAt = now + template.attackCooldownMs;
-        this.pushEvent("enemy:attack", {
-          enemyId: enemy.id,
-          targetId: target.id,
-          attack: enemy.type === "rogue_cultivator" ? "shadow-bolt" : "bite",
-        }, now);
+        this.telegraphEnemyAttack(enemy,target,now);
       }
     }
   }
@@ -1106,11 +1195,23 @@ export class GameRoom {
     return nearest;
   }
 
+  telegraphEnemyAttack(enemy,target,now){
+    const template=ENEMY_TEMPLATES[enemy.type],profile=monsterAttackFor(enemy.type);
+    const attack={type:profile.type,vfx:profile.vfx,kind:profile.kind,targetId:target.id,origin:copyPosition(enemy.position),position:{...copyPosition(target.position),y:0},radius:profile.radius,damage:template.damage,resolveAt:now+profile.windupMs};
+    enemy.pendingAttack=attack;
+    enemy.nextAttackAt=attack.resolveAt+template.attackCooldownMs;
+    this.pushEvent("enemy:telegraph",{enemyId:enemy.id,targetId:target.id,attack:attack.type,vfx:attack.vfx,kind:attack.kind,origin:copyPosition(attack.origin),position:copyPosition(attack.position),radius:attack.radius,resolveAt:attack.resolveAt},now);
+  }
+
   telegraphBossAttack(enemy, target, now) {
     enemy.attackCount += 1;
     const isNova = enemy.attackCount % 3 === 0;
     const attack = {
       type: isNova ? "thunder-nova" : "falling-blade",
+      vfx: isNova ? "shockwave" : "blade-impact",
+      kind: "boss",
+      targetId: target.id,
+      origin: copyPosition(enemy.position),
       position: isNova ? copyPosition(enemy.position) : { ...copyPosition(target.position), y: 0 },
       radius: isNova ? 5.4 : 3.1,
       damage: isNova ? 25 : 19,
@@ -1120,7 +1221,11 @@ export class GameRoom {
     enemy.nextAttackAt = attack.resolveAt + ENEMY_TEMPLATES[enemy.type].attackCooldownMs;
     this.pushEvent("enemy:telegraph", {
       enemyId: enemy.id,
+      targetId: target.id,
       attack: attack.type,
+      vfx: attack.vfx,
+      kind: attack.kind,
+      origin: copyPosition(attack.origin),
       position: copyPosition(attack.position),
       radius: attack.radius,
       resolveAt: attack.resolveAt,
@@ -1130,17 +1235,22 @@ export class GameRoom {
   resolveEnemyAttack(enemy, now) {
     const attack = enemy.pendingAttack;
     if (!attack) return;
+    if(now<attack.resolveAt)return;
     const hitIds = [];
     for (const player of this.players.values()) {
       if (!player.alive || isInSafeZone(player.position)) continue;
       if (horizontalDistance(player.position, attack.position) <= attack.radius) {
-        const dealt = this.damagePlayer(player, attack.damage, { kind: "boss", id: enemy.id }, now);
+        const dealt = this.damagePlayer(player, attack.damage, { kind: attack.kind, id: enemy.id }, now);
         if (dealt > 0) hitIds.push(player.id);
       }
     }
     this.pushEvent("enemy:attack", {
       enemyId: enemy.id,
+      targetId: attack.targetId,
       attack: attack.type,
+      vfx: attack.vfx,
+      kind: attack.kind,
+      origin: copyPosition(attack.origin),
       position: copyPosition(attack.position),
       radius: attack.radius,
       hitIds,
@@ -1190,12 +1300,16 @@ export class GameRoom {
     if (player.hp <= 0) {
       player.alive = false;
       player.isFlying = false;
-      player.respawnAt = now + 4_000;
+      player.respawnAt = 0;
+      const expPenalty = player.cultivationSystem.applyDeathPenalty(0.1);
+      this.syncCultivationFields(player);
       this.failBreakthrough(player, "tribulation-defeat", now);
       this.pushEvent("player:defeated", {
         playerId: player.id,
         source,
         respawnAt: player.respawnAt,
+        expPenalty,
+        cultivationSystem: player.cultivationSystem.serialize(),
       }, now);
     }
     return damage;
@@ -1226,6 +1340,13 @@ export class GameRoom {
       };
     }
     this.pushEvent("player:respawned", { playerId: player.id, position: copyPosition(spawn) }, now);
+    return serializePublicPlayer(player, now);
+  }
+
+  requestRespawn(id, now = Date.now()) {
+    const player = this.requirePlayer(id);
+    if (player.alive) return serializePublicPlayer(player, now);
+    return this.respawnPlayer(player, now);
   }
 
   respawnEnemy(enemy, now) {
@@ -1267,6 +1388,59 @@ export class GameRoom {
     return serializePublicPlayer(player, now);
   }
 
+  economySnapshot(player) {
+    return { gold: Math.floor(player.gold), inventory: [...player.shopInventory], equipment: { ...player.equipment } };
+  }
+
+  buyItem(id, itemId, now = Date.now()) {
+    const player = this.requirePlayer(id), item = SHOP_CATALOG[itemId];
+    if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể giao dịch khi đã tử vong.");
+    if (!item || item.bossDrop) throw gameError("UNKNOWN_ITEM", "Vật phẩm không tồn tại trong cửa hàng.");
+    if (player.cultivationSystem.realm.order < item.requiredOrder) throw gameError("REALM_REQUIRED", "Cảnh giới chưa đủ để mua vật phẩm.");
+    if (player.gold < item.price) throw gameError("NOT_ENOUGH_GOLD", "Không đủ vàng.");
+    if (item.category !== "consumables" && player.shopInventory.includes(itemId)) throw gameError("ALREADY_OWNED", "Đã sở hữu vật phẩm này.");
+    player.gold -= item.price;
+    player.shopInventory.push(itemId);
+    if (item.category === "weapons" && !player.equipment.weapon) player.equipment.weapon = itemId;
+    this.pushEvent("shop:updated", { playerId: id, action: "buy", itemId, gold: player.gold }, now);
+    return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
+  }
+
+  sellItem(id, itemId, now = Date.now()) {
+    const player = this.requirePlayer(id), item = SHOP_CATALOG[itemId], index = player.shopInventory.indexOf(itemId);
+    if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể giao dịch khi đã tử vong.");
+    if (!item || index < 0) throw gameError("ITEM_NOT_OWNED", "Không sở hữu vật phẩm này.");
+    player.shopInventory.splice(index, 1);
+    player.gold += Math.floor(item.price * 0.55);
+    for (const slot of Object.keys(player.equipment)) if (player.equipment[slot] === itemId) player.equipment[slot] = null;
+    this.pushEvent("shop:updated", { playerId: id, action: "sell", itemId, gold: player.gold }, now);
+    return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
+  }
+
+  equipItem(id, itemId, now = Date.now()) {
+    const player = this.requirePlayer(id), item = SHOP_CATALOG[itemId];
+    if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể thay trang bị khi đã tử vong.");
+    if (!item || !player.shopInventory.includes(itemId)) throw gameError("ITEM_NOT_OWNED", "Không sở hữu vật phẩm này.");
+    const slot = item.category === "weapons" ? "weapon" : item.category === "armor" ? "armor" : item.category === "accessory" ? "accessory" : null;
+    if (!slot) throw gameError("ITEM_NOT_EQUIPPABLE", "Vật phẩm này không thể trang bị.");
+    player.equipment[slot] = itemId;
+    this.pushEvent("shop:updated", { playerId: id, action: "equip", itemId, gold: player.gold }, now);
+    return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
+  }
+
+  useItem(id, itemId, now = Date.now()) {
+    const player = this.requirePlayer(id), item = SHOP_CATALOG[itemId], index = player.shopInventory.indexOf(itemId);
+    if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể dùng vật phẩm khi đã tử vong.");
+    if (!item || item.category !== "consumables" || index < 0) throw gameError("ITEM_NOT_USABLE", "Không thể sử dụng vật phẩm này.");
+    const hpBefore = player.hp, mpBefore = player.mp;
+    if (item.healAmount) player.hp = Math.min(player.maxHp, player.hp + item.healAmount);
+    if (item.manaAmount) player.mp = Math.min(player.maxMp, player.mp + item.manaAmount);
+    if (player.hp === hpBefore && player.mp === mpBefore) throw gameError("NO_ITEM_EFFECT", "Khí huyết và linh lực đã đầy.");
+    player.shopInventory.splice(index, 1);
+    this.pushEvent("item:used", { playerId: id, itemId, hp: player.hp, mp: player.mp }, now);
+    return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
+  }
+
   snapshot(now = Date.now()) {
     return {
       roomCode: this.code,
@@ -1285,6 +1459,11 @@ export class GameRoom {
     return {
       ...serializePublicPlayer(player, now),
       inventory: { ...player.inventory },
+      shopSystem: {
+        gold: Math.floor(player.gold),
+        inventory: [...player.shopInventory],
+        equipment: { ...player.equipment },
+      },
     };
   }
 }

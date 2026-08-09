@@ -143,6 +143,7 @@ async function beginJourney() {
     manaRegen: 3.5,
     minorLevel: activeCharacter.minorLevel,
     skillSystem: activeCharacter.skillSystem,
+    cultivationSystem: activeCharacter.cultivationSystem,
     shopSystem: {gold:activeCharacter.gold,inventory:activeCharacter.inventory,equipment:activeCharacter.equipment},
     gold: activeCharacter.gold,
     allocatedStats: activeCharacter.allocatedStats,
@@ -172,6 +173,7 @@ async function beginJourney() {
         cultivation: next.qi,
         questPhase: next.flightUnlocked ? 'complete' : 'arrival',
         skillSystem: next.skillSystem,
+        cultivationSystem: next.cultivationSystem,
         shopSystem: next.shopSystem,
         currentRegion: next.currentRegion,
       }));
