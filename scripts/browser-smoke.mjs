@@ -127,6 +127,11 @@ try {
     returnByValue: true,
   });
   await delay(7_000);
+  await command('Runtime.evaluate', {
+    expression: `document.dispatchEvent(new KeyboardEvent('keydown',{code:'KeyK',key:'k',bubbles:true}))`,
+    returnByValue: true,
+  });
+  await delay(300);
 
   const stateResult = await command('Runtime.evaluate', {
     expression: `JSON.stringify({
@@ -137,7 +142,10 @@ try {
       status: document.querySelector('#connection-status').textContent,
       canvas: [document.querySelector('#game-canvas').width, document.querySelector('#game-canvas').height],
       objective: document.querySelector('#objective-title').textContent,
-      online: document.querySelector('#online-count').textContent
+      online: document.querySelector('#online-count').textContent,
+      skillPanelVisible: Boolean(document.querySelector('.skill-tree-overlay') && !document.querySelector('.skill-tree-overlay').hidden),
+      skillCounters: [...document.querySelectorAll('.skill-tree-summary span')].map(node=>node.textContent.trim()),
+      unlockButtons: [...document.querySelectorAll('[data-action="unlock"]')].map(node=>node.textContent.trim())
     })`,
     returnByValue: true,
   });
@@ -187,7 +195,13 @@ try {
     && features.returnedToLobby
     && features.reentered
     && Object.values(features.generatedUiCounts).every(count => count === 1);
-  const passed = state.onboardingHidden && !state.hudHidden && !state.bossVisible && state.canvas[0] > 0 && featurePassed && runtimeErrors.length === 0;
+  const passed = state.onboardingHidden && !state.hudHidden && !state.bossVisible
+    && state.canvas[0] > 0
+    && state.skillPanelVisible
+    && state.skillCounters.some(text => text.startsWith('Điểm Mở Khóa Chiêu:'))
+    && state.skillCounters.some(text => text.startsWith('Điểm Nâng Cấp Chiêu:'))
+    && featurePassed
+    && runtimeErrors.length === 0;
   process.stdout.write(`${JSON.stringify({ passed, interaction: interactionResult.result.value, state, features, runtimeErrors, screenshot: outputPath }, null, 2)}\n`);
   websocket.close();
   if (!passed) process.exitCode = 1;

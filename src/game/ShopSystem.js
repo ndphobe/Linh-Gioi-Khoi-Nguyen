@@ -1,10 +1,10 @@
 const item = (id, name, category, icon, tier, price, requiredOrder, requiredRealm, stats, description) => Object.freeze({ id, name, category, icon, tier, price, requiredOrder, requiredRealm, ...stats, description });
 
 export const WEAPONS = Object.freeze([
-  item('iron_sword','Thanh Phong Thiết Kiếm','weapons','⚔',1,80,0,'Luyện Khí',{ damage:8,attackSpeed:.03,critRate:0,lifeSteal:0 },'Kiếm nhập môn cân bằng.'),
-  item('jade_sword','Bích Ngọc Linh Kiếm','weapons','🗡',2,260,1,'Trúc Cơ',{ damage:22,attackSpeed:.08,critRate:.05,lifeSteal:0 },'Linh kiếm tăng tốc độ xuất chiêu.'),
-  item('blood_sabre','Huyết Sát Ma Đao','weapons','🔪',3,620,2,'Kim Đan',{ damage:48,attackSpeed:.12,critRate:.10,lifeSteal:.06 },'Ma đao hút sinh lực mục tiêu.'),
-  item('heaven_blade','Cửu Thiên Thần Kiếm','weapons','✨',4,1500,3,'Nguyên Anh',{ damage:95,attackSpeed:.20,critRate:.18,lifeSteal:.10 },'Thần binh mang kiếm ý Cửu Thiên.'),
+  item('iron_sword','Thanh Phong Thiết Kiếm','weapons','⚔',1,80,0,'Luyện Khí',{ damage:8,atkBonus:8,attackSpeed:.03,critRate:0,lifeSteal:0 },'Kiếm nhập môn cân bằng.'),
+  item('jade_sword','Bích Ngọc Linh Kiếm','weapons','🗡',2,260,1,'Trúc Cơ',{ damage:22,atkBonus:22,attackSpeed:.08,critRate:.05,lifeSteal:0 },'Linh kiếm tăng tốc độ xuất chiêu.'),
+  item('blood_sabre','Huyết Sát Ma Đao','weapons','🔪',3,620,2,'Kim Đan',{ damage:48,atkBonus:48,attackSpeed:.12,critRate:.10,lifeSteal:.06 },'Ma đao hút sinh lực mục tiêu.'),
+  item('heaven_blade','Cửu Thiên Thần Kiếm','weapons','✨',4,1500,3,'Nguyên Anh',{ damage:95,atkBonus:95,attackSpeed:.20,critRate:.18,lifeSteal:.10 },'Thần binh mang kiếm ý Cửu Thiên.'),
 ]);
 export const ARMOR = Object.freeze([
   item('spirit_robe','Tụ Linh Pháp Bào','armor','🥋',1,110,0,'Luyện Khí',{ defense:7,maxMana:12 },'Pháp bào tụ linh cơ bản.'),
@@ -12,7 +12,7 @@ export const ARMOR = Object.freeze([
   item('dragon_armor','Long Lân Chiến Giáp','armor','🐉',3,900,2,'Kim Đan',{ defense:45,maxMana:50 },'Long lân chống lại thuật pháp.'),
 ]);
 export const CONSUMABLES = Object.freeze([
-  item('healing_pill','Hồi Xuân Đan','consumables','🔴',1,35,0,'Luyện Khí',{ heal:45 },'Hồi phục 45 Khí Huyết.'),
+  item('healing_pill','Hồi Xuân Đan','consumables','🔴',1,35,0,'Luyện Khí',{ heal:45,healAmount:45 },'Hồi phục 45 Khí Huyết.'),
   item('mana_pill','Tụ Linh Đan','consumables','🔵',1,40,0,'Luyện Khí',{ mana:40 },'Hồi phục 40 Linh Lực.'),
   item('spirit_charm','Hộ Thân Phù','consumables','📜',2,120,1,'Trúc Cơ',{ accessory:true,defense:5 },'Có thể trang bị vào ô Phụ Kiện.'),
   item('thunder_guard_talisman','Lôi Linh Hộ Tâm Kính','boss','⚡',3,780,1,'Trúc Cơ',{ accessory:true,defense:18,critRate:.08,bossDrop:true },'Trang bị Sử Thi chỉ rơi từ Lôi Linh Hộ Pháp.'),

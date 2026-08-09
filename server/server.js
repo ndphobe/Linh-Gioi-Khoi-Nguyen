@@ -144,6 +144,7 @@ function registerSocketHandlers(io, world, logger) {
             name: payload?.name,
             faction: payload?.faction,
             profile: payload?.profile,
+            session: payload?.session,
           },
           now,
         );
@@ -243,6 +244,34 @@ function registerSocketHandlers(io, world, logger) {
     socket.on("combat:ability", abilityHandler);
     // Compatibility alias for very small clients/prototypes.
     socket.on("ability:cast", abilityHandler);
+
+    socket.on("shop:action", (payload = {}, ack) => {
+      try {
+        const room = currentRoom(world, socket);
+        if (!room) throw makeNotInRoomError();
+        const now = Date.now(), action = String(payload?.action ?? ""), itemId = String(payload?.itemId ?? "");
+        const result = action === "buy" ? room.buyItem(socket.id, itemId, now)
+          : action === "sell" ? room.sellItem(socket.id, itemId, now)
+          : action === "equip" ? room.equipItem(socket.id, itemId, now)
+          : action === "use" ? room.useItem(socket.id, itemId, now)
+          : null;
+        if (!result) { const error = new Error("Hành động vật phẩm không hợp lệ."); error.code = "INVALID_ITEM_ACTION"; throw error; }
+        safeAck(ack, { ok: true, ...result });
+      } catch (error) {
+        reportSocketError(socket, error, ack, logger);
+      }
+    });
+
+    socket.on("player:respawn", (_payload = {}, ack) => {
+      try {
+        const room = currentRoom(world, socket);
+        if (!room) throw makeNotInRoomError();
+        const player = room.requestRespawn(socket.id, Date.now());
+        safeAck(ack, { ok: true, player });
+      } catch (error) {
+        reportSocketError(socket, error, ack, logger);
+      }
+    });
 
     socket.on("cultivation:meditate", (payload = {}, ack) => {
       try {
@@ -369,11 +398,13 @@ export async function createGameServer(options = {}) {
       world.tick(now);
       for (const room of world.rooms.values()) {
         const channel = roomChannel(room.code);
+        // Gameplay events carry the authored impact frame. Deliver them before
+        // the resulting snapshot so VFX/SFX lands before the HP reconciliation.
+        for (const event of room.drainEvents()) io.to(channel).emit("world:event", event);
         io.to(channel).volatile.emit("world:snapshot", room.snapshot(now));
         for (const playerId of room.players.keys()) {
           io.to(playerId).volatile.emit("player:state", room.privatePlayerSnapshot(playerId, now));
         }
-        for (const event of room.drainEvents()) io.to(channel).emit("world:event", event);
       }
       world.pruneEmptyRooms(now);
     } catch (error) {

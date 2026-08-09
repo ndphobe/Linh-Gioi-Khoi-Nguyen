@@ -96,6 +96,15 @@ export class AudioEngine {
         this.noise(0.09, 0.16, 540);
         this.tone({ frequency: 105, endFrequency: 55, duration: 0.11, type: 'square', gain: 0.08 });
         break;
+      case 'monster-claw':
+        this.noise(.16,.15,1900);this.tone({frequency:310,endFrequency:70,duration:.2,type:'sawtooth',gain:.09});
+        break;
+      case 'monster-magic':
+        this.noise(.22,.11,720);this.tone({frequency:190,endFrequency:52,duration:.3,type:'square',gain:.08});
+        break;
+      case 'monster-impact':
+        this.noise(.32,.2,430);this.tone({frequency:92,endFrequency:32,duration:.34,type:'sawtooth',gain:.13});
+        break;
       case 'block':
         this.noise(0.08, 0.09, 3400);
         this.tone({ frequency: 980, endFrequency: 520, duration: 0.14, type: 'square', gain: 0.075 });

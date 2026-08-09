@@ -11,7 +11,8 @@
     "start": "node server/server.js --production",
     "test": "node --test tests/*.test.js",
     "check": "npm run test && npm run build",
-    "smoke:network": "node scripts/network-smoke.mjs"
+    "smoke:network": "node scripts/network-smoke.mjs",
+    "smoke:mechanics": "node scripts/mechanics-smoke.mjs"
   },
   "dependencies": {
     "express": "^5.1.0",
