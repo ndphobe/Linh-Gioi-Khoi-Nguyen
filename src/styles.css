@@ -3223,7 +3223,7 @@ kbd {
 .sect-card__blade { display: none !important; }
 .sect-card__art {
   image-rendering: pixelated;
-  background-image: url('/assets/sect-character-atlas.png') !important;
+  background-image: url('/assets/sect-character-atlas-v2.png') !important;
   background-repeat: no-repeat !important;
   background-size: 400% 300% !important;
   background-position: 0 0 !important;

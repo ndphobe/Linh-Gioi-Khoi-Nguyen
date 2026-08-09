@@ -2,9 +2,18 @@
 <html lang="vi">
   <head>
     <script>
-      // Chrome blocks module imports and online gameplay when index.html is
-      // opened as file://. Route local copies through the game server instead.
-      if (location.protocol === 'file:') location.replace('http://127.0.0.1:3000/');
+      // Browsers intentionally block module imports and networking from file://.
+      // Reuse a running local server, or show an actionable launcher message.
+      if (location.protocol === 'file:') {
+        fetch('http://127.0.0.1:3000/api/health', { cache: 'no-store' })
+          .then((response) => {
+            if (!response.ok) throw new Error('server unavailable');
+            location.replace('http://127.0.0.1:3000/');
+          })
+          .catch(() => document.addEventListener('DOMContentLoaded', () => {
+            document.body.innerHTML = '<main style="max-width:720px;margin:12vh auto;padding:32px;color:#f7e7bd;background:#211411;border:2px solid #b8873d;font:18px/1.6 system-ui"><h1>Game cần máy chủ cục bộ</h1><p>Trình duyệt chặn game online khi mở thẳng file <code>index.html</code>. Hãy mở PowerShell tại thư mục game, chạy <code>npm.cmd run play</code>; game sẽ tự mở trong trình duyệt.</p></main>';
+          }, { once: true }));
+      }
     </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

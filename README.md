@@ -29,10 +29,12 @@ Yêu cầu Node.js 20 trở lên. Trên PowerShell của máy phát triển này
 
 ```powershell
 npm.cmd install
-npm.cmd run dev
+npm.cmd run play
 ```
 
-Lệnh `dev` khởi động chung máy chủ Express/Socket.IO, mô phỏng authoritative 20 Hz và Vite middleware trong **một terminal**. Mở `http://localhost:3000`; để kiểm tra nhiều người chơi, mở thêm một cửa sổ hoặc trình duyệt khác rồi nhập cùng mã phòng.
+Lệnh `play` khởi động chung máy chủ Express/Socket.IO, mô phỏng authoritative 20 Hz và Vite middleware trong **một terminal**, sau đó tự mở `http://localhost:3000` bằng trình duyệt mặc định. Giữ terminal này chạy trong lúc chơi. Không mở thẳng `index.html` bằng `file://` vì trình duyệt sẽ chặn module JavaScript và kết nối online. Để kiểm tra nhiều người chơi, mở thêm một cửa sổ hoặc trình duyệt khác rồi nhập cùng mã phòng.
+
+Nếu không muốn tự mở trình duyệt, dùng `npm.cmd run dev` rồi tự truy cập `http://localhost:3000`.
 
 Kiểm tra logic thuần và tạo bản production:
 

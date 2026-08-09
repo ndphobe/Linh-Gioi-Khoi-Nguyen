@@ -13,3 +13,15 @@ test('each sect character keeps isolated cultivation and economy data',()=>{
   manager.selectByFaction('orthodox','Kiếm Tu');const restored=manager.active();
   assert.equal(restored.id,sword.id);assert.equal(restored.realm,'foundation');assert.equal(restored.minorLevel,3);assert.equal(restored.currentExp,42);assert.equal(restored.gold,125);
 });
+
+test('saving remains non-fatal when browser storage is denied',()=>{
+  const storage={
+    getItem:()=>{throw new Error('SecurityError');},
+    setItem:()=>{throw new Error('QuotaExceededError');},
+  };
+  const saves=new SaveSystem(storage,'characters');
+  assert.deepEqual(saves.load(),{activeCharacterId:null,characters:{}});
+  assert.deepEqual(saves.save({activeCharacterId:'Character_A',characters:{}}),{activeCharacterId:'Character_A',characters:{}});
+  const manager=new CharacterManager(saves);
+  assert.doesNotThrow(()=>manager.selectByFaction('orthodox','Kiếm Tu'));
+});

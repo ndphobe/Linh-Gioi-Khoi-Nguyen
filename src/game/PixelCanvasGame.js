@@ -51,7 +51,7 @@ export class CultivationGame {
     this.hudVisibleUntil = performance.now() + 10_000; this.hudHover = false; this.bossEngaged = false;
     this.tribulation = null; this.cultivationTick = 0; this.bossCombatUntil = 0;
     this.terrainProps = this.createTerrainProps();
-    this.sprite = new Image(); this.sprite.src = '/assets/sect-character-atlas.png';
+    this.sprite = new Image(); this.sprite.src = new URL(`${import.meta.env.BASE_URL}assets/sect-character-atlas-v2.png`, document.baseURI).href;
     this.ui = this.collectUI();
     this.hudManager = new HUDManager(active => { this.state.paused = Boolean(active && active !== 'tribulation'); });
     this.hudManager.register('pause', this.ui.pauseMenu); this.hudManager.register('map', this.ui.worldMap);
@@ -64,6 +64,7 @@ export class CultivationGame {
     this.lootManager=new LootManager({inventory:this.inventorySystem,audio:this.audio,onGold:(amount,event)=>this.dropGoldFromEvent(amount,event),onBossReward:id=>this.toast(`Đã nhận Trang Bị Boss: ${itemById(id)?.name??id}`,'legendary'),onChange:()=>this.persistEconomy()});
     this.bossController=new BossController({onDefeated:()=>this.goldBurst()});
     this.hudManager.bindCurrency('gold',this.ui.goldCount);this.hudManager.updateCurrency('gold',this.shopSystem.gold);
+    this.cleanup = [];
     this.bound = { keydown: e => this.keydown(e), keyup: e => this.keys.delete(e.code), resize: () => this.resize(), loop: t => this.loop(t) };
     this.attach(); this.attachSocket(); this.resize();
   }
@@ -73,19 +74,27 @@ export class CultivationGame {
     return { app: id('app'), hud: id('hud'), hpFill: id('hp-fill'), hpText: id('hp-text'), mpFill: id('mp-fill'), mpText: id('mp-text'), qiFill: id('qi-fill'), qiText: id('qi-text'), playerName: id('player-name'), realmName: id('realm-name'), sectName: id('sect-name'), onlineCount: id('online-count'), skillbar: id('skillbar'), toastStack: id('toast-stack'), pauseMenu: id('pause-menu'), worldMap: id('world-map'), interactionPrompt: id('interaction-prompt'), objectiveTitle: id('objective-title'), objectiveText: id('objective-text'), bossHud: id('boss-hud'), bossName: id('boss-name'), bossFill: id('boss-fill'), bossText: id('boss-text') };
   }
 
+  listen(target, type, handler, options) {
+    if (!target) return;
+    target.addEventListener(type, handler, options);
+    this.cleanup.push(() => target.removeEventListener(type, handler, options));
+  }
+
   attach() {
-    window.addEventListener('keydown', this.bound.keydown); window.addEventListener('keyup', this.bound.keyup); window.addEventListener('resize', this.bound.resize);
-    this.canvas.addEventListener('pointermove', e => this.updatePointer(e));
-    this.canvas.addEventListener('pointerleave', () => { this.mouse.active=false;this.hudHover=false; });
-    this.canvas.addEventListener('pointerdown', e => { this.updatePointer(e); if (e.button === 0) this.cast('basic'); if (e.button === 2) this.setBlocking(true); });
-    this.canvas.addEventListener('pointerup', e => { if(e.button===2)this.setBlocking(false); });
-    this.canvas.addEventListener('contextmenu', e => e.preventDefault());
-    this.ui.skillbar?.querySelectorAll('[data-skill]').forEach(button => { button.addEventListener('click', () => this.cast(button.dataset.skill));button.addEventListener('contextmenu',e=>{e.preventDefault();if(button.dataset.skill!=='basic')this.unbindSkill(button.dataset.skill);}); });
-    const playerPanel=document.querySelector('.player-panel');playerPanel?.addEventListener('mouseenter',()=>{this.hudHover=true;});playerPanel?.addEventListener('mouseleave',()=>{this.hudHover=false;});
-    document.getElementById('resume-game')?.addEventListener('click', () => this.togglePause(false));
-    document.getElementById('change-sect')?.addEventListener('click', () => { this.destroy(); this.onExit?.(); });
-    document.getElementById('restart-game')?.addEventListener('click', () => location.reload());
-    this.ui.app?.addEventListener('pointerdown',event=>{if(event.target.closest('button'))this.audio?.play('ui');});
+    this.listen(window, 'keydown', this.bound.keydown); this.listen(window, 'keyup', this.bound.keyup); this.listen(window, 'resize', this.bound.resize);
+    this.listen(this.canvas, 'pointermove', e => this.updatePointer(e));
+    this.listen(this.canvas, 'pointerleave', () => { this.mouse.active=false;this.hudHover=false; });
+    this.listen(this.canvas, 'pointerdown', e => { this.updatePointer(e); if (e.button === 0) this.cast('basic'); if (e.button === 2) this.setBlocking(true); });
+    this.listen(this.canvas, 'pointerup', e => { if(e.button===2)this.setBlocking(false); });
+    this.listen(this.canvas, 'pointercancel', () => this.setBlocking(false));
+    this.listen(window, 'blur', () => { this.keys.clear(); this.setBlocking(false); });
+    this.listen(this.canvas, 'contextmenu', e => e.preventDefault());
+    this.ui.skillbar?.querySelectorAll('[data-skill]').forEach(button => { this.listen(button, 'click', () => this.cast(button.dataset.skill));this.listen(button, 'contextmenu',e=>{e.preventDefault();if(button.dataset.skill!=='basic')this.unbindSkill(button.dataset.skill);}); });
+    const playerPanel=document.querySelector('.player-panel');this.listen(playerPanel, 'mouseenter',()=>{this.hudHover=true;});this.listen(playerPanel, 'mouseleave',()=>{this.hudHover=false;});
+    this.listen(document.getElementById('resume-game'), 'click', () => this.togglePause(false));
+    this.listen(document.getElementById('change-sect'), 'click', () => { this.destroy(); this.onExit?.(); });
+    this.listen(document.getElementById('restart-game'), 'click', () => location.reload());
+    this.listen(this.ui.app, 'pointerdown',event=>{if(event.target.closest('button'))this.audio?.play('ui');});
   }
 
   attachSocket() {
@@ -106,7 +115,7 @@ export class CultivationGame {
 
   join() {
     this.socket?.emit('room:join', { roomCode: this.profile.roomCode, room: this.profile.roomCode, name: this.profile.name, faction: this.profile.faction, sect: this.profile.faction }, response => {
-      if (response?.ok === false) return this.toast(response.message, 'error');
+      if (response?.ok === false) return this.toast(response.error?.message ?? response.message ?? 'Không thể vào phòng.', 'error');
       this.state.joined = true; if (response?.snapshot) this.snapshot(response.snapshot); if (response?.player) this.mergeSelf(response.player);
     });
   }
@@ -174,7 +183,7 @@ export class CultivationGame {
   fastTravel(target, region){
     const apply=player=>{const p=pos(player?.position??target);this.player.position={...this.player.position,x:p.x,z:p.z};this.player.velocity={x:0,z:0};this.camera.x=p.x;this.camera.z=p.z;this.profile.currentRegion=region.id;this.mapManager.currentRegion=region.id;this.mapManager.updateMarker();this.mapManager.bindNodes();this.updateRegionUI();this.persistEconomy();this.effects.push({type:'circle',x:p.x,z:p.z,life:1,max:1,color:REGION_THEMES[region.id]?.accent??'#ffe69a'});this.toast(`Đã dịch chuyển đến ${region.name}`,'success');};
     if(!this.socket)return apply();
-    this.socket.emit('player:fast-travel',{regionId:region.id},response=>{if(response?.ok===false)return this.toast(response.message??'Không thể dịch chuyển.','error');apply(response?.player);});
+    this.socket.emit('player:fast-travel',{regionId:region.id},response=>{if(response?.ok===false)return this.toast(response.error?.message??response.message??'Không thể dịch chuyển.','error');apply(response?.player);});
   }
   currentRegion(){return REGIONS.find(region=>region.id===this.profile.currentRegion)??REGIONS[0];}
   regionTheme(){return REGION_THEMES[this.profile.currentRegion]??REGION_THEMES.sect_hall;}
@@ -318,5 +327,5 @@ export class CultivationGame {
   toast(message,tone='info'){if(!message||!this.ui.toastStack)return;const el=document.createElement('div');el.className=`toast toast--${tone} is-visible`;el.textContent=message;this.ui.toastStack.appendChild(el);setTimeout(()=>el.remove(),2600);}
   resize(){const scale=Math.max(2,Math.floor(Math.min(innerWidth/480,innerHeight/270)));this.canvas.width=Math.max(320,Math.floor(innerWidth/scale));this.canvas.height=Math.max(180,Math.floor(innerHeight/scale));this.ctx.imageSmoothingEnabled=false;}
   loop(time){if(!this.state.running)return;const dt=Math.min(.05,(time-this.lastFrame)/1000);this.lastFrame=time;if(!this.state.paused)this.update(dt);this.render();this.updateUI();requestAnimationFrame(this.bound.loop);}
-  destroy(){this.state.running=false;this.mapManager?.destroy();this.goldDropSystem?.clear();this.vfxManager?.clear();window.removeEventListener('keydown',this.bound.keydown);window.removeEventListener('keyup',this.bound.keyup);window.removeEventListener('resize',this.bound.resize);this.socket?.disconnect();}
+  destroy(){if(this.destroyed)return;this.destroyed=true;this.state.running=false;this.keys.clear();this.mapManager?.destroy();this.goldDropSystem?.clear();this.vfxManager?.clear();this.cleanup.splice(0).forEach(remove=>remove());this.shopUI?.remove();this.inventoryUI?.remove();this.skillTree?.remove();this.tribulationUI?.remove();this.socket?.disconnect();}
 }

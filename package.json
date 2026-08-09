@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Vertical slice game tu tien 3D online goc nhin thu ba.",
   "scripts": {
+    "play": "node scripts/play.mjs",
     "dev": "node server/server.js",
     "build": "vite build",
     "start": "node server/server.js --production",

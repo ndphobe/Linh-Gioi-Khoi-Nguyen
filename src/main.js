@@ -15,16 +15,40 @@ const startButton = document.getElementById('start-game');
 const status = document.getElementById('connection-status');
 const cards = [...document.querySelectorAll('.sect-card[data-sect]')];
 
-const stored = loadProfile(localStorage.getItem(STORAGE_KEY));
-const characterManager = new CharacterManager(new SaveSystem(localStorage));
+function memoryStorage() {
+  const values = new Map();
+  return {
+    getItem: (key) => values.has(key) ? values.get(key) : null,
+    setItem: (key, value) => values.set(key, String(value)),
+    removeItem: (key) => values.delete(key),
+  };
+}
+
+function usableStorage(name) {
+  try {
+    const storage = window[name];
+    const probe = `__storage_probe__${Date.now()}`;
+    storage.setItem(probe, probe);
+    storage.removeItem(probe);
+    return storage;
+  } catch {
+    return memoryStorage();
+  }
+}
+
+const persistentStorage = usableStorage('localStorage');
+const transientStorage = usableStorage('sessionStorage');
+const stored = loadProfile(persistentStorage.getItem(STORAGE_KEY));
+const characterManager = new CharacterManager(new SaveSystem(persistentStorage));
 let selectedSect = FACTIONS[stored.factionId] ? stored.factionId : DEFAULT_PROFILE.factionId;
 let socket = null;
 let game = null;
+let journeyStarting = false;
 const audio = new AudioEngine();
 
 function renderSectPreviews() {
   const atlas = new Image();
-  atlas.src = '/assets/sect-character-atlas.png';
+  atlas.src = new URL(`${import.meta.env.BASE_URL}assets/sect-character-atlas-v2.png`, document.baseURI).href;
   atlas.onload = () => cards.forEach((card, row) => {
     const host = card.querySelector('.sect-card__art'); if (!host) return;
     host.querySelectorAll(':scope > *').forEach(node => node.remove());
@@ -44,7 +68,8 @@ function generatedName() {
 
 function generatedRoomCode() {
   const bytes = new Uint8Array(3);
-  crypto.getRandomValues(bytes);
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes);
+  else bytes.forEach((_, index) => { bytes[index] = Math.floor(Math.random() * 256); });
   return `THAI-${[...bytes].map((value) => value.toString(36).padStart(2, '0')).join('').slice(0, 6).toUpperCase()}`;
 }
 
@@ -97,6 +122,7 @@ function canvas2DAvailable() {
 }
 
 async function beginJourney() {
+  if (journeyStarting || game) return;
   const name = sanitizeName(nameInput.value);
   if (name.length < 2) {
     nameInput.focus();
@@ -110,12 +136,14 @@ async function beginJourney() {
   let roomCode = normalizeRoomCode(roomInput.value);
   if (!roomCode) roomCode = generatedRoomCode();
   roomInput.value = roomCode;
-  sessionStorage.setItem(ROOM_KEY, roomCode);
+  transientStorage.setItem(ROOM_KEY, roomCode);
 
+  journeyStarting = true;
   startButton.disabled = true;
   startButton.classList.add('is-loading');
   const startLabel = startButton.querySelector('span');
   if (startLabel) startLabel.textContent = 'Đang mở tiên môn…';
+  try {
   const gameModulePromise = import('./game/Game.js');
   await Promise.all([
     gameModulePromise,
@@ -149,13 +177,6 @@ async function beginJourney() {
     currentRegion: activeCharacter.currentRegion,
   };
 
-  onboarding.classList.add('is-departing');
-  await new Promise((resolve) => setTimeout(resolve, 520));
-  onboarding.hidden = true;
-  onboarding.classList.remove('is-departing');
-  canvas.classList.add('is-active');
-  document.body.classList.add('is-playing');
-
   game = new CultivationGame({
     canvas,
     socket,
@@ -164,7 +185,7 @@ async function beginJourney() {
     onProfileChange: (next) => {
       characterManager.updateActive(next);
       const realmId = next.realm === 'goldenCore' || next.realm === 'golden_core' || next.flightUnlocked ? 'golden_core' : 'foundation';
-      localStorage.setItem(STORAGE_KEY, saveProfile({
+      persistentStorage.setItem(STORAGE_KEY, saveProfile({
         ...stored,
         name: next.name,
         factionId: next.faction,
@@ -178,11 +199,35 @@ async function beginJourney() {
     },
     onExit: returnToOnboarding,
   });
+  onboarding.classList.add('is-departing');
+  await new Promise((resolve) => setTimeout(resolve, 520));
+  onboarding.hidden = true;
+  onboarding.classList.remove('is-departing');
+  canvas.classList.add('is-active');
+  document.body.classList.add('is-playing');
   game.start();
+  } catch (error) {
+    console.error('Không thể khởi động game:', error);
+    game?.destroy();
+    game = null;
+    onboarding.hidden = false;
+    onboarding.classList.remove('is-departing');
+    canvas.classList.remove('is-active');
+    document.body.classList.remove('is-playing');
+    showInputError('Không thể tải game. Hãy kiểm tra máy chủ rồi thử lại.');
+  } finally {
+    journeyStarting = false;
+    if (!game) {
+      startButton.disabled = false;
+      startButton.classList.remove('is-loading');
+      if (startLabel) startLabel.textContent = 'Bước vào tiên lộ';
+    }
+  }
 }
 
 function returnToOnboarding() {
   game = null;
+  journeyStarting = false;
   document.body.classList.remove('is-playing');
   canvas.classList.remove('is-active');
   const hud = document.getElementById('hud');
@@ -221,7 +266,7 @@ document.querySelector('[data-action="leave-game"]')?.addEventListener('click', 
 });
 
 nameInput.value = stored.name && stored.name !== DEFAULT_PROFILE.name ? stored.name : generatedName();
-roomInput.value = normalizeRoomCode(sessionStorage.getItem(ROOM_KEY) ?? '');
+roomInput.value = normalizeRoomCode(transientStorage.getItem(ROOM_KEY) ?? '');
 selectSect(selectedSect);
 renderSectPreviews();
 connectLobby();

@@ -312,6 +312,7 @@ export async function createGameServer(options = {}) {
 
   const world = options.world ?? new GameWorld({ maxPlayers: MAX_PLAYERS_PER_ROOM });
   app.get("/api/health", (_request, response) => {
+    response.setHeader("Access-Control-Allow-Origin", "*");
     response.json({
       ok: true,
       uptimeSeconds: Math.floor(process.uptime()),

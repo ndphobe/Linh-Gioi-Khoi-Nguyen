@@ -141,12 +141,54 @@ try {
     })`,
     returnByValue: true,
   });
+  const featureResult = await command('Runtime.evaluate', {
+    expression: `(async () => {
+      const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      const press = async (code) => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
+        await wait(80);
+      };
+      const visible = selector => {
+        const element = document.querySelector(selector);
+        return Boolean(element && !element.hidden && element.classList.contains('is-open'));
+      };
+      const overlays = {};
+      await press('KeyM'); overlays.map = visible('#world-map'); await press('Escape');
+      await press('KeyK'); overlays.skills = visible('.skill-tree-overlay'); await press('Escape');
+      await press('KeyP'); overlays.shop = visible('.shop-overlay'); await press('Escape');
+      await press('KeyB'); overlays.inventory = visible('.inventory-overlay'); await press('Escape');
+
+      document.querySelector('[data-action="leave-game"]')?.click();
+      await wait(250);
+      const returnedToLobby = !document.querySelector('#onboarding')?.hidden;
+      document.querySelector('#start-game')?.click();
+      await wait(1800);
+      return {
+        overlays,
+        returnedToLobby,
+        reentered: document.querySelector('#onboarding')?.hidden === true && !document.querySelector('#hud')?.hidden,
+        generatedUiCounts: {
+          shop: document.querySelectorAll('.shop-overlay').length,
+          inventory: document.querySelectorAll('.inventory-overlay').length,
+          mapMarker: document.querySelectorAll('.map-player-pin').length,
+        },
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
   const screenshot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
   await writeFile(outputPath, Buffer.from(screenshot.data, 'base64'));
   const state = JSON.parse(stateResult.result.value);
   // Boss HUD must remain hidden until the player actually enters combat.
-  const passed = state.onboardingHidden && !state.hudHidden && !state.bossVisible && state.canvas[0] > 0 && runtimeErrors.length === 0;
-  process.stdout.write(`${JSON.stringify({ passed, interaction: interactionResult.result.value, state, runtimeErrors, screenshot: outputPath }, null, 2)}\n`);
+  const features = featureResult.result.value;
+  const featurePassed = Object.values(features.overlays).every(Boolean)
+    && features.returnedToLobby
+    && features.reentered
+    && Object.values(features.generatedUiCounts).every(count => count === 1);
+  const passed = state.onboardingHidden && !state.hudHidden && !state.bossVisible && state.canvas[0] > 0 && featurePassed && runtimeErrors.length === 0;
+  process.stdout.write(`${JSON.stringify({ passed, interaction: interactionResult.result.value, state, features, runtimeErrors, screenshot: outputPath }, null, 2)}\n`);
   websocket.close();
   if (!passed) process.exitCode = 1;
 } finally {
