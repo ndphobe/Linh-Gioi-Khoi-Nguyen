@@ -48,10 +48,10 @@ test("sanitizeName preserves Vietnamese names and removes unsafe punctuation", (
   assert.equal(sanitizeName("Một cái tên rất dài", 8), "Một cái");
 });
 
-test("normalizeRoomCode creates a compact twelve-character ASCII token", () => {
-  assert.equal(normalizeRoomCode("  thái-châu 42 "), "THAI-CHAU42");
-  assert.equal(normalizeRoomCode("ab 12", 8), "AB12");
-  assert.equal(normalizeRoomCode("--dao---huu--"), "DAO-HUU");
+test("normalizeRoomCode preserves a safe Vietnamese Tục Danh with spaces", () => {
+  assert.equal(normalizeRoomCode("  Thái Châu 42 "), "Thái Châu 42");
+  assert.equal(normalizeRoomCode("Lạc   Vô Tà", 8), "Lạc Vô T");
+  assert.equal(normalizeRoomCode("Đạo Hữu✨"), "Đạo Hữu");
 });
 
 test("clamp and cultivationPercent handle boundaries", () => {
@@ -78,7 +78,7 @@ test("only a ready Trúc Cơ profile can begin the prototype breakthrough", () =
   assert.equal(canStartBreakthrough({ ...ready, breakthroughActive: true }), false);
 });
 
-test("applyRealmSuccess is immutable and unlocks Kim Đan", () => {
+test("applyRealmSuccess is immutable and advances to Kim Đan without flight", () => {
   const source = {
     realmId: "foundation",
     cultivation: 100,
@@ -97,7 +97,7 @@ test("applyRealmSuccess is immutable and unlocks Kim Đan", () => {
   assert.equal(result.cultivation, 0);
   assert.equal(result.questPhase, "complete");
   assert.equal(result.breakthrough.status, "success");
-  assert.equal(result.unlockedFlight, true);
+  assert.equal('unlockedFlight' in result, false);
 });
 
 test("objectiveForState exposes useful dynamic quest progress", () => {

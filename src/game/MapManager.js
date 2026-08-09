@@ -1,8 +1,8 @@
 export const REGIONS = Object.freeze([
-  { id: 'sect_hall', name: 'Sảnh Điện Tu Tiên', level: 'Luyện Khí Cấp 1', requiredOrder: 0, portal: { x: 0, z: 26 }, townGate: { x: 0, z: 26 }, marker: { x: 45, y: 45 } },
-  { id: 'luoyang', name: 'Lạc Dương Thành', level: 'Trúc Cơ Cấp 1', requiredOrder: 1, portal: { x: 28, z: -8 }, townGate: { x: 25, z: -5 }, marker: { x: 67, y: 36 } },
-  { id: 'spirit_mine', name: 'Mỏ Linh Thạch', level: 'Trúc Cơ Cấp 3', requiredOrder: 1, portal: { x: 18, z: 34 }, townGate: { x: 16, z: 31 }, marker: { x: 61, y: 77 } },
-  { id: 'heaven_sect', name: 'Thiên Vân Môn', level: 'Kim Đan Cấp 1', requiredOrder: 2, portal: { x: -30, z: -18 }, townGate: { x: -27, z: -16 }, marker: { x: 26, y: 31 } },
+  { id: 'sect_hall', name: 'Sảnh Điện Tu Tiên', level: 'Luyện Khí Cấp 1', requiredOrder: 0, mapOrder: 0, portal: { x: 0, z: 26 }, townGate: { x: 0, z: 26 }, marker: { x: 45, y: 45 } },
+  { id: 'luoyang', name: 'Lạc Dương Thành', level: 'Trúc Cơ Cấp 1', requiredOrder: 1, mapOrder: 1, portal: { x: 28, z: -8 }, townGate: { x: 25, z: -5 }, marker: { x: 67, y: 36 } },
+  { id: 'spirit_mine', name: 'Mỏ Linh Thạch', level: 'Trúc Cơ Cấp 3', requiredOrder: 1, mapOrder: 2, portal: { x: 18, z: 34 }, townGate: { x: 16, z: 31 }, marker: { x: 61, y: 77 } },
+  { id: 'heaven_sect', name: 'Thiên Vân Môn', level: 'Kim Đan Cấp 1', requiredOrder: 2, mapOrder: 3, portal: { x: -30, z: -18 }, townGate: { x: -27, z: -16 }, marker: { x: 26, y: 31 } },
 ]);
 
 export class MapManager {

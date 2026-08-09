@@ -1,5 +1,5 @@
 export const CULTIVATION_BASE_EXP = 100;
-export const CULTIVATION_REALM_MULTIPLIER = 1.5;
+export const CULTIVATION_REALM_MULTIPLIER = 1.62;
 
 export const REALM_HIERARCHY = Object.freeze([
   Object.freeze({ id: 'qi_refining', name: 'Luyện Khí', order: 0, startLevel: 1, endLevel: 2, stages: 2 }),
@@ -11,6 +11,10 @@ export const REALM_HIERARCHY = Object.freeze([
 
 export const MIN_CULTIVATION_LEVEL = 1;
 export const MAX_CULTIVATION_LEVEL = 16;
+export const TRIBULATION_GATES = Object.freeze([
+  Object.freeze({ fromLevel: 6, toLevel: 7, targetRealmId: 'nascent_soul' }),
+  Object.freeze({ fromLevel: 10, toLevel: 11, targetRealmId: 'spirit_transformation' }),
+]);
 const EXP_EPSILON = 1e-7;
 const PRECISION = 1e6;
 
@@ -28,6 +32,16 @@ export function globalLevelForRealm(realmId, subStage = 1) {
   return clamp(realm.startLevel + Math.trunc(finite(subStage, 1)) - 1, realm.startLevel, realm.endLevel);
 }
 
+export function tribulationGateForLevel(level) {
+  const safeLevel = clamp(Math.trunc(finite(level, 1)), MIN_CULTIVATION_LEVEL, MAX_CULTIVATION_LEVEL);
+  return TRIBULATION_GATES.find(gate => gate.fromLevel === safeLevel) ?? null;
+}
+
+export function progressionCapForLevel(level) {
+  const safeLevel = clamp(Math.trunc(finite(level, 1)), MIN_CULTIVATION_LEVEL, MAX_CULTIVATION_LEVEL);
+  return TRIBULATION_GATES.find(gate => gate.fromLevel >= safeLevel)?.fromLevel ?? MAX_CULTIVATION_LEVEL;
+}
+
 export function requiredEXP(level, baseEXP = CULTIVATION_BASE_EXP, realmMultiplier = CULTIVATION_REALM_MULTIPLIER) {
   const safeLevel = clamp(Math.trunc(finite(level, 1)), MIN_CULTIVATION_LEVEL, MAX_CULTIVATION_LEVEL);
   const safeBase = Math.max(1, finite(baseEXP, CULTIVATION_BASE_EXP));
@@ -38,7 +52,9 @@ export function requiredEXP(level, baseEXP = CULTIVATION_BASE_EXP, realmMultipli
 export class CultivationSystem {
   constructor(state = {}, options = {}) {
     this.baseEXP = Math.max(1, finite(options.baseEXP ?? state.baseEXP, CULTIVATION_BASE_EXP));
-    this.realmMultiplier = Math.max(1.01, finite(options.realmMultiplier ?? state.realmMultiplier, CULTIVATION_REALM_MULTIPLIER));
+    const explicitMultiplier = options.realmMultiplier;
+    const storedMultiplier = finite(state.realmMultiplier, CULTIVATION_REALM_MULTIPLIER);
+    this.realmMultiplier = Math.max(1.01, finite(explicitMultiplier ?? (state.version >= 3 ? storedMultiplier : Math.max(storedMultiplier, CULTIVATION_REALM_MULTIPLIER)), CULTIVATION_REALM_MULTIPLIER));
     this.level = this.resolveLevel(state);
     const legacyPercent = finite(state.cultivationProgress ?? state.progress, 0);
     const migratedExp = state.currentExp ?? state.exp ?? this.requiredEXP * clamp(legacyPercent, 0, 100) / 100;
@@ -63,16 +79,18 @@ export class CultivationSystem {
   }
   get displayName() { return `${this.realm.name} Tầng ${this.subStage}`; }
 
-  addEXP(amount) {
+  addEXP(amount, { maxLevel = MAX_CULTIVATION_LEVEL } = {}) {
     const gained = Math.max(0, finite(amount));
     if (gained <= 0) return { gained: 0, levels: 0, subStageUps: 0, majorRealmBreakthroughs: 0, breakthroughs: [], maxed: this.isMaxLevel };
+
+    const progressionCap = clamp(Math.trunc(finite(maxLevel, MAX_CULTIVATION_LEVEL)), this.level, MAX_CULTIVATION_LEVEL);
 
     this.currentExp = stable(this.currentExp + gained);
     let levels = 0;
     let subStageUps = 0;
     const breakthroughs = [];
     // A bounded loop makes progression deterministic even after a large offline grant.
-    while (!this.isMaxLevel && this.currentExp + EXP_EPSILON >= this.requiredEXP) {
+    while (!this.isMaxLevel && this.level < progressionCap && this.currentExp + EXP_EPSILON >= this.requiredEXP) {
       const previousRealm = this.realmId;
       this.currentExp = stable(Math.max(0, this.currentExp - this.requiredEXP));
       this.level += 1;
@@ -80,8 +98,8 @@ export class CultivationSystem {
       if (this.realmId !== previousRealm) breakthroughs.push({ from: previousRealm, to: this.realmId, level: this.level });
       else subStageUps += 1;
     }
-    if (this.isMaxLevel) this.currentExp = stable(Math.min(this.currentExp, this.requiredEXP));
-    return { gained, levels, subStageUps, majorRealmBreakthroughs: breakthroughs.length, breakthroughs, maxed: this.isMaxLevel && this.progress >= 100 };
+    if (this.isMaxLevel || this.level >= progressionCap) this.currentExp = stable(Math.min(this.currentExp, this.requiredEXP));
+    return { gained, levels, subStageUps, majorRealmBreakthroughs: breakthroughs.length, breakthroughs, maxed: this.level >= progressionCap && this.progress >= 100 };
   }
 
   // Compatibility with older callers while keeping EXP as the source of truth.
@@ -106,7 +124,7 @@ export class CultivationSystem {
 
   serialize() {
     return {
-      version: 2,
+      version: 3,
       level: this.level,
       currentExp: this.currentExp,
       requiredEXP: this.requiredEXP,

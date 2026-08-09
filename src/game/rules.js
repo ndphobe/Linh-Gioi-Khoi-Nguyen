@@ -8,7 +8,7 @@ import {
 } from "./data.js";
 
 const MAX_NAME_LENGTH = 18;
-const MAX_ROOM_CODE_LENGTH = 12;
+const MAX_ROOM_CODE_LENGTH = 24;
 const QUEST_PHASE_IDS = new Set(QUEST_PHASES.map((phase) => phase.id));
 const REALM_IDS = new Set(REALMS.map((realm) => realm.id));
 
@@ -33,7 +33,7 @@ export function sanitizeName(value, maxLength = MAX_NAME_LENGTH) {
     .trim();
 }
 
-/** Turns a user-entered room token into a compact, shareable ASCII code. */
+/** Normalizes the displayed Tục Danh while preserving Vietnamese text. */
 export function normalizeRoomCode(value, maxLength = MAX_ROOM_CODE_LENGTH) {
   const safeLength = Math.max(
     1,
@@ -41,14 +41,12 @@ export function normalizeRoomCode(value, maxLength = MAX_ROOM_CODE_LENGTH) {
   );
 
   return toText(value)
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9-]/g, "")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-|-$/g, "")
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}_\- ]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim()
     .slice(0, safeLength)
-    .replace(/-$/g, "");
+    .trim();
 }
 
 export function clamp(value, min, max) {
@@ -122,7 +120,6 @@ export function applyRealmSuccess(state) {
     questPhase: "complete",
     breakthroughActive: false,
     lightningWave: PROTOTYPE_SCOPE.lightningWaves,
-    unlockedFlight: true,
   };
 
   if (nextBreakthrough) result.breakthrough = nextBreakthrough;

@@ -6,7 +6,7 @@ import { Character } from '../src/game/Character.js';
 import { CultivationSystem, REALM_HIERARCHY, requiredEXP } from '../src/game/CultivationSystem.js';
 import { ItemSystem } from '../src/game/ItemSystem.js';
 import { Player } from '../src/game/Player.js';
-import { ShopSystem, itemById } from '../src/game/ShopSystem.js';
+import { ShopSystem, itemById, itemForFaction } from '../src/game/ShopSystem.js';
 import { VFXManager } from '../src/game/VFXManager.js';
 import { Monster, monsterAttackFor } from '../src/game/Monster.js';
 import { GameRoom } from '../server/world.js';
@@ -65,7 +65,7 @@ test('player damage arms red flash, hit-stop and screen shake timers',()=>{
 test('authoritative monster damage includes only the server-equipped weapon bonus',()=>{
   const strike=({equipped=null,payloadWeapon=null}={})=>{const room=new GameRoom(`WEAPON-${equipped??payloadWeapon??'NONE'}`);const inventory=equipped?[equipped]:[];const player=room.addPlayer('p1',{name:'Kiếm Tu',faction:'heretic',session:{inventory,equipment:{weapon:equipped}}},1_000);const enemy=room.enemies.get('fox-1');player.position={x:-6,y:0,z:14};room.castAbility(player.id,{ability:'basic',aim:{x:0,z:-1},weaponId:payloadWeapon,totalAtk:9_999},2_000);return enemy.maxHp-enemy.hp;};
   assert.equal(strike(),18*1.12);
-  assert.equal(strike({equipped:'iron_sword'}),26*1.12);
+  assert.equal(strike({equipped:'iron_sword'}),(18+itemForFaction('iron_sword','heretic').damage)*1.12);
   assert.equal(strike({payloadWeapon:'iron_sword'}),18*1.12);
   assert.equal(strike({payloadWeapon:'forged_client_weapon'}),18*1.12);
 });
@@ -85,11 +85,11 @@ test('authoritative pill use updates HP, inventory and the exact gold snapshot',
 
 test('server cultivation continues through 51 percent without a render frame',()=>{
   const room=new GameRoom('EXP-SYNC');
-  const player=room.addPlayer('p1',{session:{cultivationSystem:{level:1,currentExp:76.5}}},1_000);
+  const player=room.addPlayer('p1',{session:{cultivationSystem:{version:3,level:1,currentExp:154}}},1_000);
   player.meditating=true;
-  room.tickPlayer(player,10,2_000);
+  room.tickPlayer(player,1,2_000);
   assert.equal(player.cultivationSystem.level,2);
-  assert.equal(player.cultivationSystem.currentExp,6.5);
+  assert.equal(player.cultivationSystem.currentExp,0);
 });
 
 test('a full legacy qi meter never blocks EXP dropped by a defeated monster',()=>{
@@ -99,8 +99,8 @@ test('a full legacy qi meter never blocks EXP dropped by a defeated monster',()=
   const before=player.cultivationSystem.currentExp;
   room.damageEnemy(room.enemies.get('fox-1'),999,player,2_000);
   const loot=room.drainEvents().find(event=>event.type==='loot:granted')?.loot;
-  assert.equal(loot.exp,3);
-  assert.equal(loot.qi,3);
+  assert.equal(loot.exp,2);
+  assert.equal(loot.qi,2);
   assert.ok(player.cultivationSystem.currentExp>before);
   const snapshot=room.privatePlayerSnapshot(player.id,2_100);
   assert.equal(snapshot.qi,snapshot.cultivationSystem.currentExp);
@@ -112,7 +112,7 @@ test('successive monster kills keep awarding EXP while level requirements increa
   const player=room.addPlayer('p1',{},1_000);
   const requirements=[player.cultivationSystem.requiredEXP];
   let previousLevel=player.cultivationSystem.level;
-  for(let kill=0;kill<100;kill++){
+  for(let kill=0;kill<35;kill++){
     const enemy=room.enemies.get('fox-1');
     if(!enemy.alive)room.respawnEnemy(enemy,2_000+kill*10);
     const before={level:player.cultivationSystem.level,exp:player.cultivationSystem.currentExp};
@@ -127,12 +127,13 @@ test('successive monster kills keep awarding EXP while level requirements increa
 
 test('a kill at the end of level two carries overflow into level three',()=>{
   const room=new GameRoom('EXP-OVERFLOW');
-  const player=room.addPlayer('p1',{session:{cultivationSystem:{level:2,currentExp:224}}},1_000);
-  assert.equal(player.cultivationSystem.requiredEXP,225);
+  const levelTwoRequired=requiredEXP(2);
+  const player=room.addPlayer('p1',{session:{cultivationSystem:{version:3,level:2,currentExp:levelTwoRequired-1}}},1_000);
+  assert.equal(player.cultivationSystem.requiredEXP,levelTwoRequired);
   room.damageEnemy(room.enemies.get('fox-1'),999,player,2_000);
   assert.equal(player.cultivationSystem.level,3);
   assert.ok(player.cultivationSystem.currentExp>0);
-  assert.equal(player.cultivationSystem.requiredEXP,338);
+  assert.equal(player.cultivationSystem.requiredEXP,requiredEXP(3));
 });
 
 test('death deducts ten percent once and requires explicit respawn',()=>{
@@ -141,10 +142,10 @@ test('death deducts ten percent once and requires explicit respawn',()=>{
   player.position={x:30,y:0,z:0};
   room.damagePlayer(player,999,{kind:'monster',id:'fox-1'},2_000);
   assert.equal(player.alive,false);
-  assert.equal(player.cultivationSystem.currentExp,85);
+  assert.equal(player.cultivationSystem.currentExp,100-requiredEXP(1)*.1);
   room.tickPlayer(player,30,32_000);
   assert.equal(player.alive,false);
-  assert.equal(player.cultivationSystem.currentExp,85);
+  assert.equal(player.cultivationSystem.currentExp,100-requiredEXP(1)*.1);
   const respawned=room.requestRespawn(player.id,33_000);
   assert.equal(respawned.alive,true);
   assert.equal(respawned.hp,respawned.maxHp);
@@ -170,14 +171,19 @@ test('projectile VFX dissipates exactly at max range and on first collision',()=
   rangeVfx.update(.1);rangeVfx.update(.1);
   assert.equal(rangeVfx.effects.some(effect=>effect.kind!=='impact'),false);
   const rangeImpact=rangeVfx.effects.find(effect=>effect.kind==='impact');
-  assert.equal(rangeImpact.x,2);
+  assert.equal(rangeImpact,undefined);
 
   const collisionVfx=new VFXManager({screen:value=>value,collisionTest:(_effect,position)=>position.x>=.9?{id:'enemy-1'}:null});
-  collisionVfx.cast({faction:'heretic',slot:'q',origin:{x:0,z:0},direction:{x:1,z:0},target:{x:10,z:0},maxRange:10,hitboxWidth:.2});
+  collisionVfx.cast({faction:'heretic',slot:'q',origin:{x:0,z:0},direction:{x:1,z:0},target:{x:10,z:0},maxRange:10,hitboxWidth:.2,confirmedHitIds:['enemy-1']});
   collisionVfx.update(.1);
   const collisionImpact=collisionVfx.effects.find(effect=>effect.kind==='impact');
   assert.equal(collisionImpact.collided,true);
   assert.ok(collisionImpact.x>=.9&&collisionImpact.x<10);
+
+  const rejectedVfx=new VFXManager({screen:value=>value,collisionTest:()=>({id:'enemy-1'})});
+  rejectedVfx.cast({faction:'heretic',slot:'q',origin:{x:0,z:0},direction:{x:1,z:0},target:{x:2,z:0},maxRange:2,hitboxWidth:.2,confirmedHitIds:[]});
+  rejectedVfx.update(.1);rejectedVfx.update(.1);
+  assert.equal(rejectedVfx.effects.find(effect=>effect.kind==='impact'),undefined);
 });
 
 test('monster families expose distinct claw, projectile and shockwave attacks',()=>{

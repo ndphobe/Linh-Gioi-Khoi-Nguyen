@@ -1,0 +1,19 @@
+Use case: stylized-concept
+Asset type: production-ready 2D pixel-art character sprite atlas for a browser action RPG
+Primary request: create a clean 4-column by 3-row sprite atlas for the Vietnamese xianxia game "Linh Giới Khởi Nguyên", using the existing sect character atlas as the layout and character-design reference and the gameplay master sheet as the game's mood and palette reference.
+Scene/backdrop: perfectly flat solid #00ff00 chroma-key background for later local removal; every cell has the identical flat background.
+Subjects and fixed grid:
+- Row 1, Orthodox / Thiên Kiếm Môn: same young male sword cultivator in white and pale-blue flowing robes with restrained gold trim, black high ponytail, glowing cyan spirit sword.
+- Row 2, Demonic / Huyết Ma Tông: same young male cultivator in black and deep-red layered robes with dark gold armor accents, black high ponytail, crimson demonic blade and magenta-red aura.
+- Row 3, Heretic / Vạn Độc Cốc: same masked wandering male cultivator in black, moss-green and purple robes, wide woven conical hat, twin short blades and sickly green poison aura.
+Animation columns, exact left-to-right order for every row:
+1. idle combat-ready stance
+2. running forward-right
+3. wide melee slash attack with readable weapon arc
+4. spell-cast stance with energy gathered around one raised hand
+Style/medium: authentic hand-crafted 16-bit/32-bit era pixel art, crisp square pixels, limited palette, strong dark outline, selective dithering, no smooth digital painting, no anti-aliased vector edges.
+Composition/framing: exactly 12 isolated sprites in an invisible uniform 4x3 grid; equal-width columns and equal-height rows; each character centered in its own cell; identical baseline and consistent body scale; generous clearance from all cell boundaries; no overlap between cells; effects must remain entirely inside their cell.
+Character consistency: within each row preserve exactly the same face, hairstyle, clothing design, proportions, palette and weapon across all four actions.
+Camera: consistent 3/4 side view facing right, suitable for an action RPG.
+Constraints: one character per cell; all twelve cells populated; no grid lines; no labels; no UI; no scene; no floor; no cast shadows; no text; no logos; no watermark. Background must be one perfectly uniform #00ff00 with no gradient, texture, noise, lighting variation, reflection or shadow. Do not use #00ff00 anywhere in characters or effects.
+Avoid: white background, missing cells, uneven gutters, cropped hair/weapons/effects, sprites crossing cell boundaries, inconsistent character identity, painterly rendering, blurry resizing, pseudo-pixel smoothness, extra props.

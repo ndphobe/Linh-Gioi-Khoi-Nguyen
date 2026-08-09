@@ -1,7 +1,15 @@
 node_modules/
 dist/
 .vite/
+.data/
 .chrome-profile/
+.chrome-*/
 *.log
 *.png
 !public/assets/*.png
+!public/assets/vfx/
+!public/assets/vfx/*.png
+!public/assets/equipment/
+!public/assets/equipment/*.png
+!public/assets/weapons/
+!public/assets/weapons/*.png

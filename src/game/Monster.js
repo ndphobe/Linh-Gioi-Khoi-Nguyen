@@ -23,7 +23,7 @@ export class Monster{
     const previousResolve=this.pendingAttack?.resolveAt;
     Object.assign(this,snapshot);
     this.position=point(snapshot.position??this.position);
-    this.target=point(snapshot.position??this.target??this.position);
+    this.target=point(snapshot.target??snapshot.position??this.target??this.position);
     if(snapshot.pendingAttack&&snapshot.pendingAttack.resolveAt!==previousResolve)this.beginAttack(snapshot.pendingAttack,now,epoch);
     if(!snapshot.pendingAttack&&this.attackVisual?.resolveAtEpoch>epoch+25)this.attackVisual=null;
     return this;
@@ -45,7 +45,7 @@ export class Monster{
 
   updateAttackVisual(now=globalThis.performance?.now?.()??0){if(this.impactVisual&&now>=this.impactVisual.endsAt)this.impactVisual=null;}
 
-  attackFrame(now=globalThis.performance?.now?.()??0){if(!this.attackVisual)return this.animator?.frame??0;const progress=clamp(1-(this.attackVisual.resolveAt-now)/Math.max(1,this.attackVisual.duration),0,1);return 10+Math.min(3,Math.floor(progress*4));}
+  attackFrame(){return this.animator?.frame??0;}
 
   renderAttackVFX(ctx,screen,now=globalThis.performance?.now?.()??0){
     this.updateAttackVisual(now);

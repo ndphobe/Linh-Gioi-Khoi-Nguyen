@@ -111,7 +111,9 @@ try {
         name: document.querySelector('#name-input')?.value,
         selected: document.querySelector('.sect-card.is-selected')?.dataset.sect,
         startDisabled: document.querySelector('#start-game')?.disabled,
-        webgl2: Boolean(document.createElement('canvas').getContext('webgl2'))
+        webgl2: Boolean(document.createElement('canvas').getContext('webgl2')),
+        nameInputBackground: getComputedStyle(document.querySelector('.field-group[for="name-input"] .input-shell')).backgroundImage,
+        roomInputBackground: getComputedStyle(document.querySelector('.field-group[for="room-input"] .input-shell')).backgroundImage
       };
       document.querySelector('#name-input').value = 'Kiểm Thử Thiên';
       document.querySelector('#room-input').value = 'SMOKE-01';
@@ -145,16 +147,113 @@ try {
       online: document.querySelector('#online-count').textContent,
       skillPanelVisible: Boolean(document.querySelector('.skill-tree-overlay') && !document.querySelector('.skill-tree-overlay').hidden),
       skillCounters: [...document.querySelectorAll('.skill-tree-summary span')].map(node=>node.textContent.trim()),
-      unlockButtons: [...document.querySelectorAll('[data-action="unlock"]')].map(node=>node.textContent.trim())
+      unlockButtons: [...document.querySelectorAll('[data-action="unlock"]')].map(node=>node.textContent.trim()),
+      skillLabelsFit: [...document.querySelectorAll('.skill-slot strong')].every(node=>node.scrollWidth<=node.clientWidth+1)
     })`,
+    returnByValue: true,
+  });
+  const skillBindingResult = await command('Runtime.evaluate', {
+    expression: `(async () => {
+      const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      const waitUntil = async predicate => {
+        for (let attempt = 0; attempt < 30; attempt += 1) {
+          if (predicate()) return true;
+          await wait(100);
+        }
+        return false;
+      };
+      const remove = document.querySelector('.skill-remove');
+      const skillId = remove?.dataset.skillId;
+      const from = remove?.dataset.slot;
+      remove?.click();
+      const removed = Boolean(skillId) && await waitUntil(() => !document.querySelector('.skill-remove[data-skill-id="' + skillId + '"]'));
+      const target = document.querySelector('[data-action="assign"][data-skill-id="' + skillId + '"][data-slot="e"]');
+      const targetEnabled = Boolean(target && !target.disabled);
+      target?.click();
+      const rebound = await waitUntil(() => document.querySelector('.skill-remove[data-skill-id="' + skillId + '"]')?.dataset.slot === 'e');
+      const q = document.querySelector('.skill-slot[data-skill="q"]');
+      const e = document.querySelector('.skill-slot[data-skill="e"]');
+      const overflowing = [...document.querySelectorAll('.skill-assign')].some(group => {
+        const node = group.closest('.skill-node');
+        return group.getBoundingClientRect().right > node.getBoundingClientRect().right + 1;
+      });
+      return {
+        skillId, from, removed, targetEnabled, rebound, overflowing,
+        hud: {
+          qLocked: q?.classList.contains('is-locked'),
+          eLocked: e?.classList.contains('is-locked'),
+          qIcon: q?.querySelector('.skill-slot__icon')?.textContent,
+          eIcon: e?.querySelector('.skill-slot__icon')?.textContent,
+        },
+      };
+    })()`,
+    awaitPromise: true,
+    returnByValue: true,
+  });
+  const featureResult = await command('Runtime.evaluate', {
+    expression: `(async () => {
+      const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+      const press = async (code) => {
+        window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
+        window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
+        await wait(80);
+      };
+      const visible = selector => {
+        const element = document.querySelector(selector);
+        return Boolean(element && !element.hidden && element.classList.contains('is-open'));
+      };
+      const overlays = {};
+      await press('KeyM'); overlays.map = visible('#world-map'); await press('Escape');
+      await press('KeyK'); overlays.skills = visible('.skill-tree-overlay'); await press('Escape');
+      await press('KeyP'); overlays.shop = visible('.shop-overlay'); await press('Escape');
+      await press('KeyB'); overlays.inventory = visible('.inventory-overlay'); await press('Escape');
+
+      document.querySelector('[data-action="leave-game"]')?.click();
+      await wait(250);
+      const returnedToLobby = !document.querySelector('#onboarding')?.hidden;
+      document.querySelector('#start-game')?.click();
+      await wait(1800);
+      return {
+        overlays,
+        returnedToLobby,
+        reentered: document.querySelector('#onboarding')?.hidden === true && !document.querySelector('#hud')?.hidden,
+        generatedUiCounts: {
+          shop: document.querySelectorAll('.shop-overlay').length,
+          inventory: document.querySelectorAll('.inventory-overlay').length,
+          mapMarker: document.querySelectorAll('.map-player-pin').length,
+        },
+      };
+    })()`,
+    awaitPromise: true,
     returnByValue: true,
   });
   const screenshot = await command('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false });
   await writeFile(outputPath, Buffer.from(screenshot.data, 'base64'));
   const state = JSON.parse(stateResult.result.value);
   // Boss HUD must remain hidden until the player actually enters combat.
-  const passed = state.onboardingHidden && !state.hudHidden && !state.bossVisible && state.canvas[0] > 0 && state.skillPanelVisible && state.skillCounters.some(text=>text.startsWith('Điểm Mở Khóa Chiêu:')) && state.skillCounters.some(text=>text.startsWith('Điểm Nâng Cấp Chiêu:')) && runtimeErrors.length === 0;
-  process.stdout.write(`${JSON.stringify({ passed, interaction: interactionResult.result.value, state, runtimeErrors, screenshot: outputPath }, null, 2)}\n`);
+  const features = featureResult.result.value;
+  const skillBinding = skillBindingResult.result.value;
+  const featurePassed = Object.values(features.overlays).every(Boolean)
+    && features.returnedToLobby
+    && features.reentered
+    && Object.values(features.generatedUiCounts).every(count => count === 1);
+  const passed = state.onboardingHidden && !state.hudHidden && !state.bossVisible
+    && interactionResult.result.value.before.nameInputBackground !== interactionResult.result.value.before.roomInputBackground
+    && state.canvas[0] > 0
+    && state.skillPanelVisible
+    && state.skillLabelsFit
+    && state.skillCounters.some(text => text.startsWith('Điểm Mở Khóa Chiêu:'))
+    && state.skillCounters.some(text => text.startsWith('Điểm Nâng Cấp Chiêu:'))
+    && skillBinding.removed
+    && skillBinding.targetEnabled
+    && skillBinding.rebound
+    && !skillBinding.overflowing
+    && skillBinding.hud.qLocked
+    && !skillBinding.hud.eLocked
+    && skillBinding.hud.qIcon === '◇'
+    && featurePassed
+    && runtimeErrors.length === 0;
+  process.stdout.write(`${JSON.stringify({ passed, interaction: interactionResult.result.value, state, skillBinding, features, runtimeErrors, screenshot: outputPath }, null, 2)}\n`);
   websocket.close();
   if (!passed) process.exitCode = 1;
 } finally {

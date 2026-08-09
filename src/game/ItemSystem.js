@@ -44,6 +44,11 @@ export class ItemSystem {
   syncEquipment() {
     const weapon = this.itemLookup(this.shopSystem?.equipment?.weapon);
     this.player.equipWeapon(weapon);
+    const extraAttack = ['armor','accessory'].reduce((sum,slot)=>{
+      const item=this.itemLookup(this.shopSystem?.equipment?.[slot]);
+      return sum+Math.max(0,finite(item?.atkBonus??item?.damage));
+    },0);
+    this.player.totalAtk += extraAttack;
     return this.player.totalAtk;
   }
 }

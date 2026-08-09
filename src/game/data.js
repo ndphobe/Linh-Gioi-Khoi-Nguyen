@@ -137,7 +137,7 @@ export const REALMS = Object.freeze([
     requiredForNext: 500,
     nextId: "nascent_soul",
     prototypeStatus: "playable-destination",
-    breakthrough: "Ngưng tụ Kim Đan và mở khóa Ngự Kiếm Phi Hành.",
+    breakthrough: "Ngưng tụ Kim Đan và chuẩn bị đột phá Nguyên Anh.",
   }),
   Object.freeze({
     id: "nascent_soul",
