@@ -1,7 +1,11 @@
 import { MAX_CULTIVATION_LEVEL, MIN_CULTIVATION_LEVEL, REALM_HIERARCHY, globalLevelForRealm, realmForLevel } from './CultivationSystem.js';
 
 export const HOTBAR_SLOTS = Object.freeze(['q', 'e', 'r', 'f', 'g']);
-export const SKILL_UNLOCK_LEVELS = Object.freeze([2, 3, 4, 5, 6, 8, 10]);
+// New skills are learned with gold once their cultivation requirement is met.
+// Upgrade points are reserved exclusively for improving an unlocked skill.
+export const SKILL_UNLOCK_LEVELS = Object.freeze([]);
+export const SKILL_UPGRADE_LEVELS = Object.freeze([2, 4, 6, 8, 9, 10, 12, 13, 14, 15, 16]);
+const LEGACY_SKILL_UNLOCK_LEVELS = Object.freeze([2, 3, 4, 5, 6, 8, 10]);
 
 // Use one short Hán–Việt keyword that describes the actual technique. Keeping
 // one word also guarantees that the glyph stays inside its square frame.
@@ -23,8 +27,9 @@ export function skillThemeColor(skill = {}) {
   return '#5eeeff';
 }
 
-const earnedUnlockPointsAt = level => SKILL_UNLOCK_LEVELS.filter(milestone => milestone <= level).length;
-const earnedUpgradePointsAt = level => Math.max(0, level - 1 - earnedUnlockPointsAt(level));
+const earnedUnlockPointsAt = () => 0;
+const earnedUpgradePointsAt = level => SKILL_UPGRADE_LEVELS.filter(milestone => milestone <= level).length;
+const legacyEarnedUpgradePointsAt = level => Math.max(0, level - 1 - LEGACY_SKILL_UNLOCK_LEVELS.filter(milestone => milestone <= level).length);
 
 export function cooldownVisual(remaining, total) {
   const safeTotal = Math.max(0, Number(total) || 0);
@@ -142,8 +147,8 @@ export class SkillSystemManager {
   set upgradePoints(value){this.skillUpgradePoints=Math.max(0,Math.floor(Number(value)||0));}
   get tree() { return SECT_SKILL_TREES[this.faction]; }
   getSkill(id) { return this.tree.find((entry) => entry.id === id); }
-  canUnlock(id) { const item = this.getSkill(id); return Boolean(item && !this.unlocked[id] && this.skillUnlockPoints > 0 && this.lastCultivationLevel >= item.requiredLevel && realmOrder(this.realmId) >= realmOrder(item.requiredRealm)); }
-  unlock(id) { if (!this.canUnlock(id)) return false; this.unlocked[id] = 1; this.skillUnlockPoints -= 1; return true; }
+  canUnlock(id) { const item = this.getSkill(id); return Boolean(item && !this.unlocked[id] && this.lastCultivationLevel >= item.requiredLevel && realmOrder(this.realmId) >= realmOrder(item.requiredRealm)); }
+  unlock(id) { if (!this.canUnlock(id)) return false; this.unlocked[id] = 1; return true; }
   canUpgrade(id) { const item = this.getSkill(id); return Boolean(item && this.unlocked[id] && this.unlocked[id] < item.maxTier && this.skillUpgradePoints > 0); }
   upgrade(id) { if (!this.canUpgrade(id)) return false; this.unlocked[id] += 1; this.skillUpgradePoints -= 1; return true; }
   assign(slot, id) {
@@ -173,8 +178,7 @@ export class SkillSystemManager {
     if(target<from)return{unlockAwarded:0,upgradeAwarded:0,fromLevel:from,toLevel:from};
     let unlockAwarded=0,upgradeAwarded=0;
     for(let level=from+1;level<=target;level++){
-      if(SKILL_UNLOCK_LEVELS.includes(level)){this.skillUnlockPoints+=1;unlockAwarded+=1;}
-      else{this.skillUpgradePoints+=1;upgradeAwarded+=1;}
+      if(SKILL_UPGRADE_LEVELS.includes(level)){this.skillUpgradePoints+=1;upgradeAwarded+=1;}
     }
     const realm=realmForLevel(target);
     this.realmId=realm.id;this.minorLevel=target-realm.startLevel+1;this.lastCultivationLevel=Math.max(this.lastCultivationLevel||target,target);
@@ -193,7 +197,7 @@ export class SkillSystemManager {
     return { gained, levels, tribulationReady: nextCurrent===nextRealm.endLevel && this.cultivationProgress >= 100 };
   }
   breakthrough(nextRealmId) { const current=globalLevelForRealm(this.realmId,this.minorLevel),realm=realmForLevel(current),next=CULTIVATION_REALMS.find(entry=>entry.id===nextRealmId);if(current!==realm.endLevel||this.cultivationProgress<100||!next||next.order!==realm.order+1)return false;this.applyCultivationLevel(next.startLevel);this.cultivationProgress=0;return true; }
-  serialize() { return { pointVersion:4,faction:this.faction,realmId:this.realmId,minorLevel:this.minorLevel,cultivationProgress:this.cultivationProgress,skillUnlockPoints:this.skillUnlockPoints,skillUpgradePoints:this.skillUpgradePoints,unlockPoints:this.skillUnlockPoints,upgradePoints:this.skillUpgradePoints,lastCultivationLevel:this.lastCultivationLevel,unlocked:{...this.unlocked},hotbar:{...this.hotbar} }; }
+  serialize() { return { pointVersion:5,faction:this.faction,realmId:this.realmId,minorLevel:this.minorLevel,cultivationProgress:this.cultivationProgress,skillUnlockPoints:0,skillUpgradePoints:this.skillUpgradePoints,unlockPoints:0,upgradePoints:this.skillUpgradePoints,lastCultivationLevel:this.lastCultivationLevel,unlocked:{...this.unlocked},hotbar:{...this.hotbar} }; }
   restore(state) {
     if (!state || state.faction !== this.faction) return;
     this.cultivationProgress = Math.max(0, Math.min(100, Number(state.cultivationProgress) || 0));
@@ -211,14 +215,16 @@ export class SkillSystemManager {
     }
     const assigned=new Set();
     for (const slot of HOTBAR_SLOTS) { const id=state.hotbar?.[slot];if(this.unlocked[id]&&!assigned.has(id)){this.hotbar[slot]=id;assigned.add(id);} }
-    if(state.pointVersion===4){
-      this.skillUnlockPoints=Math.max(0,Math.floor(Number(state.skillUnlockPoints??state.unlockPoints)||0));
+    if(state.pointVersion===5){
+      this.skillUnlockPoints=0;
       this.skillUpgradePoints=Math.max(0,Math.floor(Number(state.skillUpgradePoints??state.upgradePoints)||0));
       this.lastCultivationLevel=Math.max(MIN_CULTIVATION_LEVEL,Math.min(MAX_CULTIVATION_LEVEL,Math.floor(Number(state.lastCultivationLevel)||this.lastCultivationLevel)));
     }else{
-      const unlockSpent=Math.max(0,Object.keys(this.unlocked).length-1),upgradeSpent=Object.values(this.unlocked).reduce((sum,tier)=>sum+Math.max(0,tier-1),0);
-      this.skillUnlockPoints=Math.max(0,earnedUnlockPointsAt(this.lastCultivationLevel)-unlockSpent);
-      this.skillUpgradePoints=Math.max(0,earnedUpgradePointsAt(this.lastCultivationLevel)-upgradeSpent);
+      const upgradeSpent=Object.values(this.unlocked).reduce((sum,tier)=>sum+Math.max(0,tier-1),0);
+      const storedUpgradePoints=Math.max(0,Math.floor(Number(state.skillUpgradePoints??state.upgradePoints)||0));
+      const legacyBonus=state.pointVersion===4?Math.max(0,storedUpgradePoints+upgradeSpent-legacyEarnedUpgradePointsAt(this.lastCultivationLevel)):0;
+      this.skillUnlockPoints=0;
+      this.skillUpgradePoints=Math.max(0,earnedUpgradePointsAt(this.lastCultivationLevel)+legacyBonus-upgradeSpent);
     }
   }
 }

@@ -31,6 +31,14 @@ const COLORS = Object.freeze({
 });
 const KEYS_TO_SLOT = { KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f', KeyG: 'g' };
 const TRIBULATION_WAVES = 2;
+const skillPanelStateSignature=system=>JSON.stringify({
+  faction:system.faction,
+  realmId:system.realmId,
+  lastCultivationLevel:system.lastCultivationLevel,
+  skillUpgradePoints:system.skillUpgradePoints,
+  unlocked:system.unlocked,
+  hotbar:system.hotbar,
+});
 const REGION_THEMES = Object.freeze({
   sect_hall:{base:'#17191e',tileA:'#30272a',tileB:'#292328',line:'#54383c',accent:'#c69a45',mini:'#30272a',prop:'palace'},
   luoyang:{base:'#252019',tileA:'#514638',tileB:'#453b31',line:'#6c5c47',accent:'#e5a24b',mini:'#544a38',prop:'city'},
@@ -329,6 +337,7 @@ export class CultivationGame {
     this.shopSystem.gold=Math.max(0,Number(data.gold));this.skillSystem.availableGold=this.shopSystem.gold;
     this.profile.gold=this.shopSystem.gold;this.profile.shopSystem=this.shopSystem.serialize();
     this.uiManager.updateGold(this.shopSystem.gold,this.ui.goldCount,this.shopUI?.querySelector('[data-shop-gold]'),this.inventoryUI?.querySelector('[data-inventory-gold]'));
+    if(before!==this.shopSystem.gold&&this.skillTreePanel?.element)this.skillTreePanel.render();
     const now=performance.now();if(before!==this.shopSystem.gold&&now-(this.lastGoldPersistAt??0)>750){this.lastGoldPersistAt=now;this.onProfileChange?.(this.profile);}
   }
 
@@ -343,7 +352,7 @@ export class CultivationGame {
     if(this.cultivationSystem.level>beforeLevel){this.goldBurst();this.toast(`${this.cultivationSystem.displayName} · Level ${this.cultivationSystem.level}`,'legendary');if(pointAwards.unlockAwarded)this.toast(`+${pointAwards.unlockAwarded} Điểm Mở Khóa Chiêu`,'realm');if(pointAwards.upgradeAwarded)this.toast(`+${pointAwards.upgradeAwarded} Điểm Nâng Cấp Chiêu`,'success');}
     const now=performance.now();if(forcePersist||beforeExp!==this.cultivationSystem.currentExp&&(now-(this.lastProgressPersistAt??0)>750)){this.lastProgressPersistAt=now;this.onProfileChange?.(this.profile);}
   }
-  syncSkills(state){if(!state)return;this.skillSystem.restore(state);this.profile.skillSystem=this.skillSystem.serialize();this.skillTreePanel?.render();}
+  syncSkills(state){if(!state)return;const before=skillPanelStateSignature(this.skillSystem);this.skillSystem.restore(state);this.profile.skillSystem=this.skillSystem.serialize();if(before!==skillPanelStateSignature(this.skillSystem)&&this.skillTreePanel?.element)this.skillTreePanel.render();}
   syncCooldowns(state={}){for(const [rawKey,remainingMs] of Object.entries(state)){const key=rawKey==='basic'?'basic':rawKey.toLowerCase();const remaining=Math.max(0,Number(remainingMs)||0)/1000;this.cooldowns.set(key,remaining);this.cooldownTotals.set(key,Math.max(this.cooldownTotals.get(key)??0,remaining));}if(Number.isFinite(Number(state.dash)))this.state.dashCooldown=Math.max(0,Number(state.dash)/1000);}
   applyShopSnapshot(shop){
     if(!shop)return;this.shopSystem.gold=Math.max(0,Number(shop.gold)||0);this.shopSystem.inventory=[...(shop.inventory??[])].filter(id=>itemById(id));this.shopSystem.equipment={weapon:null,armor:null,accessory:null,...shop.equipment};this.shopSystem.equipped=this.shopSystem.equipment.weapon;this.itemSystem.syncEquipment();this.profile.shopSystem=this.shopSystem.serialize();this.profile.gold=this.shopSystem.gold;this.syncServerGold(shop);this.renderShop();this.renderInventory();this.onProfileChange?.(this.profile);

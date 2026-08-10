@@ -147,9 +147,19 @@ try {
       online: document.querySelector('#online-count').textContent,
       skillPanelVisible: Boolean(document.querySelector('.skill-tree-overlay') && !document.querySelector('.skill-tree-overlay').hidden),
       skillCounters: [...document.querySelectorAll('.skill-tree-summary span')].map(node=>node.textContent.trim()),
+      cultivationRealms: [...document.querySelectorAll('.cultivation-ladder strong')].map(node=>node.textContent.trim()),
       unlockButtons: [...document.querySelectorAll('[data-action="unlock"]')].map(node=>node.textContent.trim()),
       skillLabelsFit: [...document.querySelectorAll('.skill-slot strong')].every(node=>node.scrollWidth<=node.clientWidth+1)
     })`,
+    returnByValue: true,
+  });
+  const skillDomStabilityResult = await command('Runtime.evaluate', {
+    expression: `(async () => {
+      const node = document.querySelector('.skill-remove');
+      await new Promise(resolve => setTimeout(resolve, 350));
+      return Boolean(node && node.isConnected && node === document.querySelector('.skill-remove'));
+    })()`,
+    awaitPromise: true,
     returnByValue: true,
   });
   const skillBindingResult = await command('Runtime.evaluate', {
@@ -242,18 +252,21 @@ try {
     && state.canvas[0] > 0
     && state.skillPanelVisible
     && state.skillLabelsFit
-    && state.skillCounters.some(text => text.startsWith('Điểm Mở Khóa Chiêu:'))
+    && skillDomStabilityResult.result.value === true
+    && state.skillCounters.some(text => text.startsWith('Vàng hiện có:'))
     && state.skillCounters.some(text => text.startsWith('Điểm Nâng Cấp Chiêu:'))
+    && !state.skillCounters.some(text => text.includes('Điểm Mở Khóa Chiêu') || text.includes('Mở thêm điểm'))
+    && state.cultivationRealms.join('|') === 'Luyện Khí|Trúc Cơ|Kim Đan|Nguyên Anh|Hóa Thần'
     && skillBinding.removed
     && skillBinding.targetEnabled
     && skillBinding.rebound
     && !skillBinding.overflowing
     && skillBinding.hud.qLocked
     && !skillBinding.hud.eLocked
-    && skillBinding.hud.qIcon === '◇'
+    && skillBinding.hud.qIcon === 'Trống'
     && featurePassed
     && runtimeErrors.length === 0;
-  process.stdout.write(`${JSON.stringify({ passed, interaction: interactionResult.result.value, state, skillBinding, features, runtimeErrors, screenshot: outputPath }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ passed, interaction: interactionResult.result.value, state, skillDomStable:skillDomStabilityResult.result.value, skillBinding, features, runtimeErrors, screenshot: outputPath }, null, 2)}\n`);
   websocket.close();
   if (!passed) process.exitCode = 1;
 } finally {

@@ -1,8 +1,8 @@
-import { CULTIVATION_REALMS, HOTBAR_SLOTS, SKILL_UNLOCK_LEVELS, skillThemeColor, vietnameseSkillGlyph } from '../SkillSystem.js';
+import { CULTIVATION_REALMS, HOTBAR_SLOTS, skillThemeColor, vietnameseSkillGlyph } from '../SkillSystem.js';
 
 export function skillTreePanelMarkup(system){
-  const nextUnlock=SKILL_UNLOCK_LEVELS.find(level=>level>system.lastCultivationLevel);
-  const counters=`<div class="skill-tree-summary"><span>Điểm Mở Khóa Chiêu: <b>${system.skillUnlockPoints}</b></span><span>Điểm Nâng Cấp Chiêu: <b>${system.skillUpgradePoints}</b></span><span>${nextUnlock?`Mở thêm điểm ở Lv ${nextUnlock}`:'Đã nhận đủ điểm mở chiêu'}</span></div>`;
+  const gold=Math.max(0,Math.floor(Number(system.availableGold)||0));
+  const counters=`<div class="skill-tree-summary"><span>Vàng hiện có: <b>🪙 ${gold.toLocaleString('vi-VN')}</b></span><span>Điểm Nâng Cấp Chiêu: <b>${system.skillUpgradePoints}</b></span></div>`;
   const skills=system.tree.map(skill=>{
     const tier=system.unlocked[skill.id]??0,assigned=system.slotForSkill(skill.id),levelLocked=system.lastCultivationLevel<skill.requiredLevel,affordable=(system.availableGold??Infinity)>=skill.unlockCost,canUnlock=system.canUnlock(skill.id)&&affordable;
     const requiredRealm=CULTIVATION_REALMS.find(realm=>realm.id===skill.requiredRealm)?.name??skill.requiredRealm;
@@ -13,7 +13,7 @@ export function skillTreePanelMarkup(system){
       ? `<button class="skill-node__upgrade" data-action="upgrade" data-skill-id="${skill.id}" aria-label="Nâng cấp ${skill.name}" ${system.canUpgrade(skill.id)?'':'disabled'}>+</button>`
       : `<button data-action="unlock" data-skill-id="${skill.id}" ${canUnlock?'':'disabled'}>Mở · 🪙 ${skill.unlockCost}</button>`;
     const assignment=tier?`<div class="skill-assign" aria-label="Gán phím cho ${skill.name}">${HOTBAR_SLOTS.map(slot=>{const occupant=system.skillForSlot(slot),isCurrent=assigned===slot,occupied=Boolean(occupant&&!isCurrent),blocked=Boolean(assigned||occupant);const stateClass=isCurrent?'active':occupied?'occupied':'available';const label=isCurrent?`${slot.toUpperCase()} ✓`:occupied?`${slot.toUpperCase()} 🔒`:`${slot.toUpperCase()} +`;return `<button data-action="assign" data-skill-id="${skill.id}" data-slot="${slot}" class="${stateClass}" ${blocked?'disabled':''} aria-label="${isCurrent?skill.name+' đang ở ô '+slot.toUpperCase():occupied?'Ô '+slot.toUpperCase()+' đã có '+occupant.name:'Gán '+skill.name+' vào ô '+slot.toUpperCase()}" title="${isCurrent?'Chiêu này đang ở '+slot.toUpperCase():occupied?'Ô '+slot.toUpperCase()+' đã có '+occupant.name:'Ô trống · gán vào '+slot.toUpperCase()}">${label}</button>`;}).join('')}${assigned?`<button class="skill-remove" data-action="remove" data-skill-id="${skill.id}" data-slot="${assigned}">Gỡ ${skill.name} khỏi ${assigned.toUpperCase()}</button>`:''}</div>`:'';
-    const requirement=tier?`Cấp chiêu ${tier}/${skill.maxTier}`:`${levelLocked||realmLocked?'🔒 ':''}Yêu cầu: ${requiredRealm} · Cấp ${skill.requiredLevel} · Giá ${skill.unlockCost} vàng${!affordable?' · Chưa đủ vàng':''}`;
+    const requirement=tier?`Cấp chiêu ${tier}/${skill.maxTier}${tier<skill.maxTier?` · Nâng cấp cần 1 Điểm Nâng Cấp Chiêu`:''}`:`${levelLocked||realmLocked?'🔒 ':''}Yêu cầu: ${requiredRealm} · Cấp ${skill.requiredLevel} · Giá ${skill.unlockCost} vàng${!affordable?' · Chưa đủ vàng':''}`;
     return `<article class="skill-node ${tier?'unlocked':'locked'} ${levelLocked||realmLocked?'realm-locked':''}"><i title="${skill.name}" style="--skill-color:${skillThemeColor(skill)}">${vietnameseSkillGlyph(skill)}</i><div><h3>${skill.name}</h3><p>${skill.description}</p>${combatStats?`<small class="skill-stats">${combatStats} · Tu vi ×${multiplier.toFixed(2)}</small>`:''}<small class="skill-requirement">${requirement}${assigned?` · Đang ở ${assigned.toUpperCase()}`:''}</small></div>${action}${assignment}</article>`;
   }).join('');
   return `${counters}<div class="skill-tree-grid">${skills}</div>`;

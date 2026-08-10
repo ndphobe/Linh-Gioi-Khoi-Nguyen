@@ -277,6 +277,10 @@ test("skill unlocks enforce real level and gold on the server",()=>{
   const result=room.updateSkill(player.id,{action:'unlock',skillId:'jade_shield'},1_200);
   assert.equal(result.player.gold,20);
   assert.equal(result.skillSystem.unlocked.jade_shield,1);
+  assert.equal(result.skillSystem.skillUpgradePoints,1);
+  const upgraded=room.updateSkill(player.id,{action:'upgrade',skillId:'jade_shield'},1_300);
+  assert.equal(upgraded.skillSystem.unlocked.jade_shield,2);
+  assert.equal(upgraded.skillSystem.skillUpgradePoints,0);
 });
 
 test("a premium skill keeps its own area behavior and real damage on any hotbar key",()=>{

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { SECT_SKILL_TREES, SkillSystemManager, cooldownVisual } from '../src/game/SkillSystem.js';
 import { skillTreePanelMarkup } from '../src/game/UI/SkillTreePanel.js';
 
@@ -43,46 +44,58 @@ test('restore rejects skills above the authoritative cultivation level',()=>{
   assert.equal(manager.canUnlock('jade_shield'),false);
 });
 
-test('unlock and upgrade currencies cannot be interchanged', () => {
+test('skills unlock with cultivation requirements while upgrades spend upgrade points', () => {
   const manager = new SkillSystemManager({ faction: 'orthodox', realmId: 'nascent_soul', minorLevel: 1 });
   assert.equal(manager.unlock('jade_shield'), true);
-  assert.equal(manager.unlockPoints, 4);
+  assert.equal(manager.unlockPoints, 0);
   assert.equal(manager.upgrade('jade_shield'), true);
   assert.equal(manager.unlocked.jade_shield, 2);
+  assert.equal(manager.upgradePoints, 2);
   assert.equal(manager.assign('e', 'jade_shield'), true);
   assert.equal(manager.skillForSlot('e').tier, 2);
 });
 
-test('seven milestone levels award unlocks and remaining levels award upgrades', () => {
+test('sub-stages award upgrade points and major realm breakthroughs do not gate gold unlocks', () => {
   const manager = new SkillSystemManager({ faction: 'demonic', realmId: 'qi_refining', minorLevel: 1 });
   const early=manager.applyCultivationLevel(5);
-  assert.deepEqual({unlock:early.unlockAwarded,upgrade:early.upgradeAwarded},{unlock:4,upgrade:0});
-  assert.equal(manager.skillUnlockPoints,4);
+  assert.deepEqual({unlock:early.unlockAwarded,upgrade:early.upgradeAwarded},{unlock:0,upgrade:2});
+  assert.equal(manager.skillUnlockPoints,0);
   const sixth=manager.applyCultivationLevel(6);
-  assert.deepEqual({unlock:sixth.unlockAwarded,upgrade:sixth.upgradeAwarded},{unlock:1,upgrade:0});
+  assert.deepEqual({unlock:sixth.unlockAwarded,upgrade:sixth.upgradeAwarded},{unlock:0,upgrade:1});
   const later=manager.applyCultivationLevel(7);
-  assert.deepEqual({unlock:later.unlockAwarded,upgrade:later.upgradeAwarded},{unlock:0,upgrade:1});
-  assert.equal(manager.skillUpgradePoints,1);
+  assert.deepEqual({unlock:later.unlockAwarded,upgrade:later.upgradeAwarded},{unlock:0,upgrade:0});
+  assert.equal(manager.skillUpgradePoints,3);
 });
 
-test('all sixteen cultivation levels award exactly seven unlocks and eight upgrades', () => {
+test('all sixteen cultivation levels award eleven sub-stage upgrade points', () => {
   const manager = new SkillSystemManager({ faction: 'orthodox', realmId: 'qi_refining', minorLevel: 1 });
   const result = manager.applyCultivationLevel(16);
-  assert.equal(result.unlockAwarded,7);
-  assert.equal(result.upgradeAwarded,8);
+  assert.equal(result.unlockAwarded,0);
+  assert.equal(result.upgradeAwarded,11);
   assert.equal(manager.realmId,'spirit_transformation');
   assert.equal(manager.minorLevel,6);
 });
 
-test('skill panel exposes separate counters, unlock actions and plus upgrades',()=>{
+test('skill panel exposes gold, upgrade points, unlock actions and plus upgrades',()=>{
   const manager=new SkillSystemManager({faction:'orthodox',realmId:'golden_core',minorLevel:2});
+  manager.availableGold=1234;
   let markup=skillTreePanelMarkup(manager);
-  assert.match(markup,/Điểm Mở Khóa Chiêu: <b>5<\/b>/);
-  assert.match(markup,/Điểm Nâng Cấp Chiêu: <b>0<\/b>/);
+  assert.match(markup,/Vàng hiện có: <b>🪙 1\.234<\/b>/);
+  assert.match(markup,/Điểm Nâng Cấp Chiêu: <b>3<\/b>/);
+  assert.doesNotMatch(markup,/Điểm Mở Khóa Chiêu|Mở thêm điểm ở Lv/);
   assert.match(markup,/>Mở · 🪙 180<\/button>/);
   assert.equal(manager.hotbar.q,'sword_intent');
   markup=skillTreePanelMarkup(manager);
   assert.match(markup,/class="skill-node__upgrade"[^>]*>\+<\/button>/);
+});
+
+test('onboarding lists every cultivation realm from lowest to highest',()=>{
+  const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
+  const realms=['Luyện Khí','Trúc Cơ','Kim Đan','Nguyên Anh','Hóa Thần'];
+  const positions=realms.map(name=>html.indexOf(`<strong>${name}</strong>`));
+  assert.ok(positions.every(position=>position>=0));
+  assert.deepEqual([...positions].sort((a,b)=>a-b),positions);
+  assert.match(html,/Lv 11–16/);
 });
 
 test('hotbar bindings are unique and can be removed', () => {

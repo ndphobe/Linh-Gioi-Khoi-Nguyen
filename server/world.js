@@ -1029,7 +1029,7 @@ export class GameRoom {
       if (player.cultivationSystem.realm.order < requiredRealm.order) {
         throw gameError("SKILL_REALM_REQUIRED", `Cần đạt tu vi ${requiredRealm.name} mới có thể mở ${skill.name}.`);
       }
-      if (!player.skillSystem.canUnlock(skillId)) throw gameError("INVALID_SKILL_ACTION", "Chưa đủ điều kiện hoặc điểm mở khóa chiêu.");
+      if (!player.skillSystem.canUnlock(skillId)) throw gameError("INVALID_SKILL_ACTION", "Chiêu thức đã mở hoặc chưa đủ điều kiện tu vi.");
       spentGold = Math.max(0, Math.floor(Number(skill.unlockCost) || 0));
       if (player.gold < spentGold) throw gameError("NOT_ENOUGH_GOLD", `Cần ${spentGold} vàng để lĩnh ngộ ${skill.name}.`);
       changed = player.skillSystem.unlock(skillId);
