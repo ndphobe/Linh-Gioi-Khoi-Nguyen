@@ -14,7 +14,7 @@ const roomInput = document.getElementById('room-input');
 const startButton = document.getElementById('start-game');
 const status = document.getElementById('connection-status');
 const cards = [...document.querySelectorAll('.sect-card[data-sect]')];
-const DEFAULT_PRODUCTION_SERVER_URL = 'https://linh-gioi-khoi-nguyen-server.onrender.com';
+const DEFAULT_PRODUCTION_SERVER_URL = 'https://linh-gioi-khoi-nguyen-server-sg.onrender.com';
 const GAME_SERVER_URL = String(
   import.meta.env.VITE_SERVER_URL || (import.meta.env.PROD ? DEFAULT_PRODUCTION_SERVER_URL : ''),
 ).trim().replace(/\/+$/, '');
