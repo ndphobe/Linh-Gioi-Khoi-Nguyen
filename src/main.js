@@ -14,6 +14,7 @@ const roomInput = document.getElementById('room-input');
 const startButton = document.getElementById('start-game');
 const status = document.getElementById('connection-status');
 const cards = [...document.querySelectorAll('.sect-card[data-sect]')];
+const GAME_SERVER_URL = String(import.meta.env.VITE_SERVER_URL ?? '').trim().replace(/\/+$/, '');
 
 function memoryStorage() {
   const values = new Map();
@@ -93,11 +94,15 @@ function selectSect(sect) {
 
 function connectLobby() {
   if (socket) socket.disconnect();
-  socket = io({
+  // Development and the standalone Node deployment serve client + Socket.IO
+  // from one origin. A static host (for example Vercel) supplies the public
+  // Node server through VITE_SERVER_URL at build time.
+  socket = io(GAME_SERVER_URL || undefined, {
     autoConnect: true,
     reconnection: true,
     reconnectionDelay: 600,
     reconnectionDelayMax: 3500,
+    timeout: 10_000,
     transports: ['websocket', 'polling'],
   });
   socket.on('connect', () => setStatus('Linh mạch ổn định · máy chủ đã sẵn sàng', 'online'));
