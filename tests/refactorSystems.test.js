@@ -194,6 +194,12 @@ test('monster families expose distinct claw, projectile and shockwave attacks',(
   const visual=monster.beginAttack({attack:'dark-fireball',origin:{x:0,z:0},position:{x:3,z:0},resolveAt:1_680},1_000,1_000);
   assert.equal(visual.profile.sound,'monster-magic');
   assert.equal(visual.resolveAt,1_680);
+  monster.updateAttackVisual(1_681);
+  assert.equal(monster.attackVisual,null);
+
+  monster.beginAttack({attack:'dark-fireball',origin:{x:0,z:0},position:{x:3,z:0},resolveAt:2_000},1_700,1_700);
+  monster.sync({position:{x:0,z:0},pendingAttack:null},1_750,1_750);
+  assert.equal(monster.attackVisual,null);
 });
 
 test('monster damage resolves only at impact time and only inside the telegraphed hitbox',()=>{

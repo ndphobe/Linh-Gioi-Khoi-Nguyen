@@ -25,7 +25,11 @@ export class Monster{
     this.position=point(snapshot.position??this.position);
     this.target=point(snapshot.target??snapshot.position??this.target??this.position);
     if(snapshot.pendingAttack&&snapshot.pendingAttack.resolveAt!==previousResolve)this.beginAttack(snapshot.pendingAttack,now,epoch);
-    if(!snapshot.pendingAttack&&this.attackVisual?.resolveAtEpoch>epoch+25)this.attackVisual=null;
+    // A null pendingAttack is authoritative: the attack resolved or was
+    // cancelled. Always remove its telegraph, including after resolveAt. The
+    // previous condition only cleared future attacks and left expired claw
+    // circles painted forever when an unreliable attack event was missed.
+    if(Object.hasOwn(snapshot,'pendingAttack')&&!snapshot.pendingAttack)this.attackVisual=null;
     return this;
   }
 
@@ -43,7 +47,10 @@ export class Monster{
     return this.impactVisual;
   }
 
-  updateAttackVisual(now=globalThis.performance?.now?.()??0){if(this.impactVisual&&now>=this.impactVisual.endsAt)this.impactVisual=null;}
+  updateAttackVisual(now=globalThis.performance?.now?.()??0){
+    if(this.attackVisual&&now>=this.attackVisual.resolveAt)this.attackVisual=null;
+    if(this.impactVisual&&now>=this.impactVisual.endsAt)this.impactVisual=null;
+  }
 
   attackFrame(){return this.animator?.frame??0;}
 
