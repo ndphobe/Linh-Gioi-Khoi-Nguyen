@@ -208,6 +208,17 @@ test("empty rooms tick safely and are pruned after their grace period", () => {
   assert.equal(world.rooms.has("EMPTY"), false);
 });
 
+test("player snapshots include only enemies in the current region", () => {
+  const room = new GameRoom("REGION-SNAPSHOT");
+  const player = room.addPlayer("p1", { name: "Kiếm Tu" }, 1_000);
+  const fullSnapshot = room.snapshot(1_000);
+  const playerSnapshot = room.snapshotForPlayer(player.id, 1_000);
+
+  assert.ok(fullSnapshot.enemies.length > playerSnapshot.enemies.length);
+  assert.ok(playerSnapshot.enemies.length > 0);
+  assert.ok(playerSnapshot.enemies.every((enemy) => enemy.regionId === player.currentRegion));
+});
+
 test("public joins cannot forge gold, equipment or cultivation through the session payload",()=>{
   const world=new GameWorld();
   const {player}=world.joinRoom('socket-a','SECURE',{name:'Kẻ Gian',resumeToken:'securetoken12345678901234567890',session:{gold:999_999_999,inventory:['heaven_blade'],equipment:{weapon:'heaven_blade'},cultivationSystem:{level:16,currentExp:99_999}}},1_000);

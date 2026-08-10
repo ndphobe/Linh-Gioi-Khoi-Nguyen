@@ -1758,7 +1758,10 @@ export class GameRoom {
     return { player: serializePublicPlayer(player, now), shopSystem: this.economySnapshot(player) };
   }
 
-  snapshot(now = Date.now()) {
+  snapshot(now = Date.now(), regionId = null) {
+    const enemies = regionId
+      ? [...this.enemies.values()].filter((enemy) => enemy.regionId === regionId)
+      : [...this.enemies.values()];
     return {
       roomCode: this.code,
       serverTime: now,
@@ -1767,8 +1770,13 @@ export class GameRoom {
       safeZone: SAFE_ZONE,
       breakthroughAltar: BREAKTHROUGH_ALTAR,
       players: [...this.players.values()].map((player) => serializePublicPlayer(player, now)),
-      enemies: [...this.enemies.values()].map(serializeEnemy),
+      enemies: enemies.map(serializeEnemy),
     };
+  }
+
+  snapshotForPlayer(id, now = Date.now()) {
+    const player = this.requirePlayer(id);
+    return this.snapshot(now, player.currentRegion);
   }
 
   privatePlayerSnapshot(id, now = Date.now()) {

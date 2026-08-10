@@ -161,7 +161,7 @@ function registerSocketHandlers(io, world, logger) {
           ok: true,
           playerId: socket.id,
           roomCode: room.code,
-          snapshot: room.snapshot(now),
+          snapshot: room.snapshotForPlayer(socket.id, now),
           player: room.privatePlayerSnapshot(socket.id, now),
         };
         socket.emit("room:joined", response);
@@ -316,7 +316,7 @@ function registerSocketHandlers(io, world, logger) {
         const now = Date.now();
         safeAck(ack, {
           ok: true,
-          snapshot: room.snapshot(now),
+          snapshot: room.snapshotForPlayer(socket.id, now),
           player: room.privatePlayerSnapshot(socket.id, now),
         });
       } catch (error) {
@@ -434,8 +434,8 @@ export async function createGameServer(options = {}) {
         // Gameplay events carry the authored impact frame. Deliver them before
         // the resulting snapshot so VFX/SFX lands before the HP reconciliation.
         for (const event of room.drainEvents()) io.to(channel).emit("world:event", event);
-        io.to(channel).volatile.emit("world:snapshot", room.snapshot(now));
         for (const playerId of room.players.keys()) {
+          io.to(playerId).volatile.emit("world:snapshot", room.snapshotForPlayer(playerId, now));
           io.to(playerId).volatile.emit("player:state", room.privatePlayerSnapshot(playerId, now));
         }
       }
