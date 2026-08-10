@@ -33,7 +33,9 @@ hưởng.
 
 ## 2. Cấu hình frontend Vercel
 
-Trong **Vercel > Project > Settings > Environment Variables**, thêm:
+Frontend mặc định kết nối tới service Render của repository. Khi chuyển sang
+một backend khác, trong **Vercel > Project > Settings > Environment Variables**
+thêm biến ghi đè:
 
 ```text
 VITE_SERVER_URL=https://<render-service>.onrender.com
