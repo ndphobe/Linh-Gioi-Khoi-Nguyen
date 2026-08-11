@@ -221,6 +221,12 @@ export function playerGrowthForLevel(level = 1) {
   });
 }
 
+export const PLAYER_BASE_COMBAT_STATS = Object.freeze({
+  defense: 36,
+  attackSpeed: .02,
+  critRate: .023,
+});
+
 const effectiveBasicDamage = (attackPower, faction) => round(attackPower * (faction === "orthodox" ? 1.38 : faction === "heretic" ? 1.12 : 1), 2);
 
 function refreshEquipmentStats(player) {
@@ -233,9 +239,9 @@ function refreshEquipmentStats(player) {
   player.baseAtk = growth.baseAttack;
   player.totalAtk = round(growth.baseAttack + stats.attack, 2);
   player.basicDamage = effectiveBasicDamage(player.totalAtk,player.faction);
-  player.defense = round(stats.defense,2);
-  player.attackSpeed = round(Math.min(.35,stats.attackSpeed),4);
-  player.critRate = round(Math.min(.75,stats.critRate),4);
+  player.defense = round(PLAYER_BASE_COMBAT_STATS.defense+stats.defense,2);
+  player.attackSpeed = round(Math.min(.35,PLAYER_BASE_COMBAT_STATS.attackSpeed+stats.attackSpeed),4);
+  player.critRate = round(Math.min(.75,PLAYER_BASE_COMBAT_STATS.critRate+stats.critRate),4);
   player.lifeSteal = round(Math.min(.6,stats.lifeSteal+(player.faction==="demonic"?.14:0)),4);
   player.hp = clamp(player.hp + Math.max(0, player.maxHp - previousMaxHp), 0, player.maxHp);
   player.mp = clamp(player.mp + Math.max(0, player.maxMp - previousMaxMp), 0, player.maxMp);
@@ -607,9 +613,9 @@ function createPlayer(id, identity, spawn, now) {
     baseAtk: growth.baseAttack,
     totalAtk: round(growth.baseAttack + gearStats.attack,2),
     basicDamage: effectiveBasicDamage(growth.baseAttack + gearStats.attack,faction),
-    defense: round(gearStats.defense,2),
-    attackSpeed: round(Math.min(.35,gearStats.attackSpeed),4),
-    critRate: round(Math.min(.75,gearStats.critRate),4),
+    defense: round(PLAYER_BASE_COMBAT_STATS.defense+gearStats.defense,2),
+    attackSpeed: round(Math.min(.35,PLAYER_BASE_COMBAT_STATS.attackSpeed+gearStats.attackSpeed),4),
+    critRate: round(Math.min(.75,PLAYER_BASE_COMBAT_STATS.critRate+gearStats.critRate),4),
     lifeSteal: round(Math.min(.6,gearStats.lifeSteal+(faction==="demonic"?.14:0)),4),
     // Legacy qi fields mirror the active EXP system. They are no longer a
     // second capped progression track.

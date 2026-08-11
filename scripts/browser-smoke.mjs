@@ -149,7 +149,12 @@ try {
       skillCounters: [...document.querySelectorAll('.skill-tree-summary span')].map(node=>node.textContent.trim()),
       cultivationRealms: [...document.querySelectorAll('.cultivation-ladder strong')].map(node=>node.textContent.trim()),
       unlockButtons: [...document.querySelectorAll('[data-action="unlock"]')].map(node=>node.textContent.trim()),
-      skillLabelsFit: [...document.querySelectorAll('.skill-slot strong')].every(node=>node.scrollWidth<=node.clientWidth+1)
+      skillLabelsFit: [...document.querySelectorAll('.skill-slot strong')].every(node=>node.scrollWidth<=node.clientWidth+1),
+      hudPanelsSeparated: (() => {
+        const player = document.querySelector('.player-panel')?.getBoundingClientRect();
+        const equipment = document.querySelector('.equipped-hud')?.getBoundingClientRect();
+        return Boolean(player && equipment && equipment.top >= player.bottom + 7);
+      })()
     })`,
     returnByValue: true,
   });
@@ -231,6 +236,7 @@ try {
           shop: document.querySelectorAll('.shop-overlay').length,
           inventory: document.querySelectorAll('.inventory-overlay').length,
           mapMarker: document.querySelectorAll('.map-player-pin').length,
+          equippedHud: document.querySelectorAll('.equipped-hud').length,
         },
       };
     })()`,
@@ -252,6 +258,7 @@ try {
     && state.canvas[0] > 0
     && state.skillPanelVisible
     && state.skillLabelsFit
+    && state.hudPanelsSeparated
     && skillDomStabilityResult.result.value === true
     && state.skillCounters.some(text => text.startsWith('Vàng hiện có:'))
     && state.skillCounters.some(text => text.startsWith('Điểm Nâng Cấp Chiêu:'))

@@ -7,6 +7,7 @@ import {
   GameRoom,
   GameWorld,
   MONSTER_BALANCE,
+  PLAYER_BASE_COMBAT_STATS,
   monsterScaleForWave,
   playerGrowthForLevel,
   sanitizeFaction,
@@ -36,6 +37,15 @@ test("every cultivation level raises core stats and authoritative basic damage",
   assert.equal(high.snapshot.baseAtk,sixth.baseAttack);
   assert.equal(high.snapshot.totalAtk,sixth.baseAttack);
   assert.equal(high.snapshot.basicDamage,Math.round(high.damage*100)/100);
+});
+
+test("every unequipped character starts with the requested base combat stats",()=>{
+  const room=new GameRoom('BASE-COMBAT-STATS');
+  const snapshot=room.privatePlayerSnapshot(room.addPlayer('p1',{},1_000).id,1_100);
+  assert.deepEqual(PLAYER_BASE_COMBAT_STATS,{defense:36,attackSpeed:.02,critRate:.023});
+  assert.equal(snapshot.defense,36);
+  assert.equal(snapshot.attackSpeed,.02);
+  assert.equal(snapshot.critRate,.023);
 });
 
 test("level-up snapshots keep current and maximum HP, MP, attack and combat damage synchronized",()=>{
@@ -357,9 +367,9 @@ test("basic attacks use the authoritative life-steal rate while skills never lif
     cultivationSystem:{level:4,currentExp:0},
   }},1_000);
   const snapshot=room.privatePlayerSnapshot(player.id,1_100);
-  assert.equal(snapshot.defense,27);
-  assert.equal(snapshot.attackSpeed,.09);
-  assert.equal(snapshot.critRate,.05);
+  assert.equal(snapshot.defense,63);
+  assert.equal(snapshot.attackSpeed,.11);
+  assert.equal(snapshot.critRate,.073);
   assert.equal(snapshot.lifeSteal,.24);
 
   player.position={x:-6,y:0,z:14};
@@ -433,7 +443,7 @@ test("poison skills tick authoritative damage and armor mitigates incoming hits"
   const tank=room.addPlayer('tank',{session:{inventory:['spirit_robe'],equipment:{armor:'spirit_robe'}}},5_000);
   tank.position={x:30,y:0,z:0};
   assert.equal(tank.maxMp,114);
-  assert.equal(room.damagePlayer(tank,107,{kind:'monster'},6_000),100);
+  assert.equal(room.damagePlayer(tank,143,{kind:'monster'},6_000),100);
 });
 
 test("EXP crosses Kim Đan normally and stops only at the Nguyên Anh gate",()=>{
