@@ -175,7 +175,12 @@ export class SkillSystemManager {
   applyCultivationLevel(targetLevel){
     const target=Math.max(MIN_CULTIVATION_LEVEL,Math.min(MAX_CULTIVATION_LEVEL,Math.trunc(Number(targetLevel)||MIN_CULTIVATION_LEVEL)));
     const from=Math.max(MIN_CULTIVATION_LEVEL,this.lastCultivationLevel||target);
-    if(target<from)return{unlockAwarded:0,upgradeAwarded:0,fromLevel:from,toLevel:from};
+    if(target<from){
+      const realm=realmForLevel(target);this.realmId=realm.id;this.minorLevel=target-realm.startLevel+1;this.lastCultivationLevel=target;
+      for(const item of this.tree)if(item.requiredLevel>target||realmOrder(item.requiredRealm)>realm.order)delete this.unlocked[item.id];
+      for(const slot of HOTBAR_SLOTS)if(!this.unlocked[this.hotbar[slot]])this.hotbar[slot]=null;
+      return{unlockAwarded:0,upgradeAwarded:0,fromLevel:from,toLevel:target,downgraded:true};
+    }
     let unlockAwarded=0,upgradeAwarded=0;
     for(let level=from+1;level<=target;level++){
       if(SKILL_UPGRADE_LEVELS.includes(level)){this.skillUpgradePoints+=1;upgradeAwarded+=1;}

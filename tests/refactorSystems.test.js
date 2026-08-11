@@ -10,6 +10,19 @@ import { ShopSystem, itemById, itemForFaction } from '../src/game/ShopSystem.js'
 import { VFXManager } from '../src/game/VFXManager.js';
 import { Monster, monsterAttackFor } from '../src/game/Monster.js';
 import { GameRoom } from '../server/world.js';
+import { MapManager, REGIONS } from '../src/game/MapManager.js';
+
+test('map unlocks require both the cultivation realm and its sub-stage',()=>{
+  const manager=new MapManager({realmOrder:1,subStage:1});
+  const luoyang=REGIONS.find(region=>region.id==='luoyang');
+  const spiritMine=REGIONS.find(region=>region.id==='spirit_mine');
+  assert.equal(manager.isUnlocked(luoyang),true);
+  assert.equal(manager.isUnlocked(spiritMine),false);
+  manager.setCultivation(1,2);
+  assert.equal(manager.isUnlocked(spiritMine),false);
+  manager.setCultivation(2,1);
+  assert.equal(manager.isUnlocked(spiritMine),true);
+});
 
 test('cultivation hierarchy maps the exact sixteen levels and exponential EXP curve',()=>{
   assert.deepEqual(REALM_HIERARCHY.map(({name,stages,startLevel,endLevel})=>({name,stages,startLevel,endLevel})),[

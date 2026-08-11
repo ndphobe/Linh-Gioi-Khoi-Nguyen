@@ -57,8 +57,12 @@ const projectRoot = path.resolve(path.dirname(currentFile), "..");
  *
  * breakthrough:start
  *   {} (payload optional)
- *   Requires full Qi, one Hộ Tâm Đan, Trúc Cơ realm, and the altar. The server
- *   runs three telegraphed lightning waves; survival unlocks Kim Đan flight.
+ *   Requires a full EXP bar at the Nguyên Anh or Hóa Thần gate. The server
+ *   runs ten telegraphed lightning waves in the dedicated dodge arena.
+ *
+ * breakthrough:move
+ *   { direction: -1|0|1 }
+ *   Server-authoritative horizontal A/D movement used only during tribulation.
  *
  * world:request
  *   no payload. Ack: { ok: true, snapshot, player }.
@@ -306,6 +310,19 @@ function registerSocketHandlers(io, world, logger) {
         safeAck(ack, { ok: true, player });
       } catch (error) {
         reportSocketError(socket, error, ack, logger);
+      }
+    });
+
+    socket.on("breakthrough:move", (payload = {}) => {
+      try {
+        const now = Date.now();
+        if (now - socket.data.lastMoveHandledAt < 14) return;
+        socket.data.lastMoveHandledAt = now;
+        const room = currentRoom(world, socket);
+        if (!room) throw makeNotInRoomError();
+        room.updateBreakthroughMove(socket.id, payload, now);
+      } catch (error) {
+        socket.emit("game:error", publicError(error));
       }
     });
 

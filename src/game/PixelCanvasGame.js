@@ -17,6 +17,7 @@ import { CombatSystem } from './CombatSystem.js';
 import { UIManager } from './UIManager.js';
 import { Monster, monsterAttackFor } from './Monster.js';
 import { SkillTreePanel } from './UI/SkillTreePanel.js';
+import { TribulationScreen } from './TribulationScreen.js';
 
 export const PLAYER_MOTION = Object.freeze({
   walkSpeed: 6.2, acceleration: 18, deceleration: 23,
@@ -30,7 +31,7 @@ const COLORS = Object.freeze({
   heretic: { robe: '#193c36', trim: '#81e65a', dark: '#111c22', aura: '#7aff71' },
 });
 const KEYS_TO_SLOT = { KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f', KeyG: 'g' };
-const TRIBULATION_WAVES = 2;
+const TRIBULATION_WAVES = 10;
 const skillPanelStateSignature=system=>JSON.stringify({
   faction:system.faction,
   realmId:system.realmId,
@@ -85,8 +86,10 @@ export class CultivationGame {
     this.combatSystem=new CombatSystem({enemies:()=>this.enemies.values()});
     this.hudManager = new HUDManager(active => { this.state.paused = Boolean(active && active !== 'tribulation'); });
     this.hudManager.register('pause', this.ui.pauseMenu); this.hudManager.register('map', this.ui.worldMap);
+    this.tribulationScreen=new TribulationScreen({app:this.ui.app,socket:this.socket,keys:this.keys,faction:this.profile.faction,spriteSrc:this.sprite.src});
+    this.tribulationUI=this.tribulationScreen.element;this.hudManager.register('tribulation',this.tribulationUI);
     this.skillTreePanel=new SkillTreePanel({app:this.ui.app,hudManager:this.hudManager,skillSystem:this.skillSystem,onAction:action=>this.performSkillAction(action),onChange:({state})=>{this.profile.skillSystem=state;this.onProfileChange?.(this.profile);this.updateUI();}});
-    this.mapManager = new MapManager({ overlay: this.ui.worldMap, realmOrder: this.realmOrder(), currentRegion: this.profile.currentRegion, onTeleport: (target, region) => this.fastTravel(target, region), onClose: () => this.hudManager.close('map') });
+    this.mapManager = new MapManager({ overlay: this.ui.worldMap, realmOrder: this.realmOrder(), subStage: this.cultivationSystem.subStage, currentRegion: this.profile.currentRegion, onTeleport: (target, region) => this.fastTravel(target, region), onClose: () => this.hudManager.close('map') });
     this.ensureGoldCounter(); this.ensureAttackStat(); this.ensureShopUI();
     this.ensureInventoryUI(); this.ensureEquippedHud(); this.ensureTouchControls();
     this.inventorySystem=new InventorySystem(this.shopSystem,this.profile);
@@ -160,6 +163,7 @@ export class CultivationGame {
     if (!this.state.running) return;
     if (['KeyW','KeyA','KeyS','KeyD','Space','ShiftLeft','ShiftRight'].includes(event.code)) event.preventDefault();
     if (event.repeat) return;
+    if(this.state.breakthroughActive){if(event.code==='KeyA'||event.code==='KeyD')this.keys.add(event.code);return;}
     if(!this.player.canAct)return;
     this.keys.add(event.code);
     if(event.code==='Space'){event.preventDefault();return this.dash();}
@@ -270,17 +274,18 @@ export class CultivationGame {
   cycleTarget(){const living=[...this.enemies.values()].filter(enemy=>enemy.alive!==false).sort((a,b)=>Math.hypot(a.position.x-this.player.position.x,a.position.z-this.player.position.z)-Math.hypot(b.position.x-this.player.position.x,b.position.z-this.player.position.z));if(!living.length){this.lockedTargetId=null;return;}const index=living.findIndex(enemy=>enemy.id===this.lockedTargetId);this.lockedTargetId=living[(index+1)%living.length].id;this.toast(`Khóa mục tiêu: ${this.enemies.get(this.lockedTargetId)?.label??this.lockedTargetId}`,'info');}
   canRequestBreakthrough(){return Boolean(tribulationGateForLevel(this.cultivationSystem.level)&&this.cultivationSystem.progress>=100&&!this.state.breakthroughActive);}
   requestBreakthrough(){if(!this.socket||!this.state.joined)return this.toast('Cần kết nối máy chủ để độ kiếp.','warning');this.socket.timeout(4000).emit('breakthrough:start',{},(error,response)=>{if(error||response?.ok===false)return this.toast(response?.error?.message??'Không thể bắt đầu độ kiếp.','warning');if(response?.player)this.mergeSelf(response.player);});}
-  syncBreakthrough(state={}){const active=['active','resolving'].includes(state.status);this.state.breakthroughActive=active;if(active){this.ensureTribulationUI();this.hudManager.open('tribulation');const wave=this.tribulationUI?.querySelector('[data-wave]');if(wave)wave.textContent=`Thiên Lôi ${Math.min(TRIBULATION_WAVES,Math.max(1,state.wave||1))} / ${TRIBULATION_WAVES}`;}else if(this.hudManager.isOpen('tribulation'))this.hudManager.close('tribulation');}
+  syncBreakthrough(state={}){const wasActive=this.state.breakthroughActive,active=['active','resolving'].includes(state.status);this.state.breakthroughActive=active;if(active){this.ensureTribulationUI();this.tribulationScreen.show(state);this.hudManager.open('tribulation');}else if(wasActive){this.keys.delete('KeyA');this.keys.delete('KeyD');this.tribulationScreen.finish(state.status==='idle'?'success':'failure',state);setTimeout(()=>{if(!this.state.breakthroughActive&&this.hudManager.isOpen('tribulation'))this.hudManager.close('tribulation');},1500);}else if(this.hudManager.isOpen('tribulation')&&this.tribulationScreen.element.hidden)this.hudManager.close('tribulation');}
   performSkillAction({action,id,slot}){return new Promise(resolve=>{if(!this.socket||!this.state.joined){this.toast('Đang kết nối lại máy chủ.','warning');resolve(false);return;}this.socket.timeout(4000).emit('skill:action',{action,skillId:id,slot},(error,response)=>{if(error||response?.ok===false){this.toast(response?.error?.message??'Máy chủ không xác nhận thay đổi kỹ năng.','warning');resolve(false);return;}this.syncSkills(response.skillSystem??response.player?.skillSystem);if(response.shopSystem)this.applyShopSnapshot(response.shopSystem);if(response.player)this.mergeSelf(response.player);resolve(true);});});}
   updateObjective(){if(!this.ui.objectiveTitle||!this.ui.objectiveText)return;const level=this.cultivationSystem.level,progress=Math.round(this.cultivationSystem.progress),gate=tribulationGateForLevel(level);let title='Tích lũy tu vi',text='Đánh quái hoặc nhấn C trong khu an toàn để tĩnh tọa.';if(gate&&progress>=100){title=`Thiên kiếp ${gate.targetRealmId==='nascent_soul'?'Nguyên Anh':'Hóa Thần'}`;text='Nhấn B hoặc N ở bất kỳ đâu để bắt đầu độ kiếp.';}else if(level>=11){title='Hóa Thần chi lộ';text='Cảnh giới càng cao, EXP nhận được càng giảm và yêu cầu càng lớn.';}else if(level>=7){title='Nguyên Anh tu luyện';text=`Tiến tới Hóa Thần · ${progress}% tầng hiện tại`;}else if(level>=5){title='Kim Đan viên mãn';text=`Tiến tới Nguyên Anh · ${progress}% tầng hiện tại`;}this.ui.objectiveTitle.textContent=title;this.ui.objectiveText.textContent=text;}
   ensureTouchControls(){if(this.touchControls)return;const el=document.createElement('div');el.className='touch-controls';el.setAttribute('aria-label','Điều khiển cảm ứng');el.innerHTML='<div class="touch-move"><button data-key="KeyW">▲</button><button data-key="KeyA">◀</button><button data-key="KeyS">▼</button><button data-key="KeyD">▶</button></div><div class="touch-actions"><button data-action="basic">⚔</button><button data-action="dash">Lướt</button><button data-hold="block">Đỡ</button><button data-action="q">Q</button><button data-action="e">E</button><button data-action="r">R</button><button data-action="f">F</button><button data-action="g">G</button></div>';this.ui.app?.appendChild(el);this.touchControls=el;el.querySelectorAll('[data-key]').forEach(button=>{const key=button.dataset.key;this.listen(button,'pointerdown',event=>{event.preventDefault();this.keys.add(key);});for(const type of ['pointerup','pointercancel','pointerleave'])this.listen(button,type,()=>this.keys.delete(key));});el.querySelectorAll('[data-action]').forEach(button=>this.listen(button,'pointerdown',event=>{event.preventDefault();const action=button.dataset.action;if(action==='dash')this.dash();else this.cast(action);}));const block=el.querySelector('[data-hold="block"]');this.listen(block,'pointerdown',event=>{event.preventDefault();this.setBlocking(true);});for(const type of ['pointerup','pointercancel','pointerleave'])this.listen(block,type,()=>this.setBlocking(false));}
 
   update(dt) {
+    this.tribulationScreen?.update(dt);
     this.state.dashCooldown = Math.max(0, this.state.dashCooldown - dt);
     this.goldDropSystem?.update(dt,this.player.position);
     this.vfxManager?.update(dt);
     this.cooldowns.forEach((value,key)=>{const next=Math.max(0,value-dt);this.cooldowns.set(key,next);if(value>0&&next===0){const button=this.ui.skillbar?.querySelector(`[data-skill="${key}"]`);this.hudManager.pulseSkillReady(button);this.audio?.play('cooldown-ready');}});
-    const direction = !this.player.canAct || this.state.meditation || this.state.blocking ? { x: 0, z: 0 } : this.input();
+    const direction = !this.player.canAct || this.state.meditation || this.state.blocking || this.state.breakthroughActive ? { x: 0, z: 0 } : this.input();
     const moving = direction.x || direction.z;
     if (moving) this.player.facing = (Math.round(Math.atan2(direction.x, -direction.z) / (Math.PI / 4)) + 8) % 8;
     if(this.mouse.active&&(this.player.action!=='idle'||!moving))this.player.facing=(Math.round((this.player.aimAngle+Math.PI/2)/(Math.PI/4))+8)%8;
@@ -319,7 +324,7 @@ export class CultivationGame {
     for (let i = this.effects.length - 1; i >= 0; i--) { const effect = this.effects[i]; effect.life -= dt; if (effect.type === 'wave') { effect.x += effect.dx * 15 * dt; effect.z += effect.dz * 15 * dt; } if(effect.type==='burst'||effect.type==='spark'){effect.x+=effect.dx*5*dt;effect.z+=effect.dz*5*dt;}if(effect.type==='spirit')effect.z-=dt*.7;if (effect.life <= 0) this.effects.splice(i, 1); }
     const now=performance.now();for(let i=this.pendingEffects.length-1;i>=0;i--)if(now>=this.pendingEffects[i].at){const effect=this.pendingEffects.splice(i,1)[0];this.effects.push({...effect,life:.65,max:.65});}
     for(let i=this.damageNumbers.length-1;i>=0;i--){this.damageNumbers[i].life-=dt;this.damageNumbers[i].z-=dt*.55;if(this.damageNumbers[i].life<=0)this.damageNumbers.splice(i,1);}
-    this.netTime += dt; if (this.netTime >= 1 / 20) { this.netTime = 0; if(this.player.canAct)this.socket?.emit('player:move', { position: this.player.position, yaw: this.player.facing * Math.PI / 4, velocity: this.player.velocity, meditating: this.state.meditation, sequence: Date.now() }); }
+    this.netTime += dt; if (this.netTime >= 1 / 20) { this.netTime = 0; if(this.player.canAct&&!this.state.breakthroughActive)this.socket?.emit('player:move', { position: this.player.position, yaw: this.player.facing * Math.PI / 4, velocity: this.player.velocity, meditating: this.state.meditation, sequence: Date.now() }); }
     const boss=[...this.enemies.values()].find(e=>e.isBoss&&e.alive!==false);if(boss){const pixels=Math.hypot((boss.position.x-this.player.position.x)*18,(boss.position.z-this.player.position.z)*12);const combat=performance.now()<this.bossCombatUntil||boss.isAttacking||boss.tookDamageRecently;if(pixels<250||combat)this.bossEngaged=true;if(pixels>300&&!combat)this.bossEngaged=false;}
     this.updateHudVisibility();
   }
@@ -347,7 +352,7 @@ export class CultivationGame {
     if(!state)return;
     const beforeLevel=this.cultivationSystem.level,beforeExp=this.cultivationSystem.currentExp;
     this.cultivationSystem.sync(state);
-    const pointAwards=this.skillSystem.applyCultivationLevel(this.cultivationSystem.level);this.skillSystem.cultivationProgress=this.cultivationSystem.progress;this.mapManager?.setRealmOrder(this.realmOrder());
+    const pointAwards=this.skillSystem.applyCultivationLevel(this.cultivationSystem.level);this.skillSystem.cultivationProgress=this.cultivationSystem.progress;this.mapManager?.setCultivation(this.realmOrder(),this.cultivationSystem.subStage);
     this.profile.realm=this.cultivationSystem.realmId;this.profile.realmName=this.cultivationSystem.displayName;this.profile.minorLevel=this.cultivationSystem.subStage;this.profile.qi=this.cultivationSystem.currentExp;this.profile.cultivationSystem=this.cultivationSystem.serialize();this.profile.skillSystem=this.skillSystem.serialize();
     if(this.cultivationSystem.level>beforeLevel){this.goldBurst();this.toast(`${this.cultivationSystem.displayName} · Level ${this.cultivationSystem.level}`,'legendary');if(pointAwards.unlockAwarded)this.toast(`+${pointAwards.unlockAwarded} Điểm Mở Khóa Chiêu`,'realm');if(pointAwards.upgradeAwarded)this.toast(`+${pointAwards.upgradeAwarded} Điểm Nâng Cấp Chiêu`,'success');}
     const now=performance.now();if(forcePersist||beforeExp!==this.cultivationSystem.currentExp&&(now-(this.lastProgressPersistAt??0)>750)){this.lastProgressPersistAt=now;this.onProfileChange?.(this.profile);}
@@ -379,11 +384,11 @@ export class CultivationGame {
     if(event.type==='player:respawned'&&event.playerId===this.socket?.id)this.finishRespawn(event);
     if(event.type==='loot:granted'&&event.playerId===this.socket?.id){if(Number.isFinite(Number(event.loot?.totalGold)))this.syncServerGold({gold:event.loot.totalGold});if(event.loot?.cultivationSystem)this.syncCultivation(event.loot.cultivationSystem,true);if(event.loot?.skillSystem)this.syncSkills(event.loot.skillSystem);const exp=Number(event.loot?.exp??event.loot?.qi)||0;if(exp>0){this.spawnExpPickup(exp);this.toast(`+${Math.round(exp)} EXP Tu Vi`,'success');}if(event.loot?.skillUpgradePoints)this.toast('+1 Điểm Nâng Cấp Chiêu (rơi hiếm)','legendary');}
     if(event.type==='loot:granted'&&event.playerId===this.socket?.id){for(const key of ['linhThach','linhThao','linhCot','hoTamDan'])if(Number(event.loot?.[key]))this.profile.resources[key]=(this.profile.resources[key]??0)+Number(event.loot[key]);this.onProfileChange?.(this.profile);}
-    if(event.type==='breakthrough:started'&&event.playerId===this.socket?.id){this.syncBreakthrough({status:'active',wave:0});this.toast('Thiên kiếp bắt đầu · hãy né khỏi vùng sét!','realm');}
-    if(event.type==='breakthrough:telegraph'&&event.playerId===this.socket?.id){const life=Math.max(.2,((event.resolveAt??Date.now()+900)-Date.now())/1000);this.effects.push({type:'danger',...pos(event.position),radius:event.radius,life,max:life,color:'#d9c4ff'});this.syncBreakthrough({status:'active',wave:event.wave});}
-    if(event.type==='breakthrough:strike'&&event.playerId===this.socket?.id){this.effects.push({type:'lightning',...pos(event.position),life:.65,max:.65,color:event.hit?'#ff6b78':'#fff0a0'});}
+    if(event.type==='breakthrough:started'&&event.playerId===this.socket?.id){this.syncBreakthrough({status:'active',wave:0,hits:0,maxHits:event.maxHits,targetRealmId:event.targetRealmId,dodgeX:0});this.toast('Thiên kiếp bắt đầu · dùng A/D né khỏi HITBOX đỏ!','realm');}
+    if(event.type==='breakthrough:telegraph'&&event.playerId===this.socket?.id){this.tribulationScreen?.onTelegraph(event);this.syncBreakthrough({status:'active',...event,telegraph:event});}
+    if(event.type==='breakthrough:strike'&&event.playerId===this.socket?.id){this.tribulationScreen?.onStrike(event);if(event.hit)this.audio?.play('thunder');}
     if(event.type==='breakthrough:success'&&event.playerId===this.socket?.id){if(event.cultivationSystem)this.syncCultivation(event.cultivationSystem,true);if(event.skillSystem)this.syncSkills(event.skillSystem);this.syncBreakthrough({status:'idle',wave:TRIBULATION_WAVES});this.goldBurst();const realm=event.targetRealmId==='spirit_transformation'?'Hóa Thần':'Nguyên Anh';this.toast(`Đột phá ${realm} thành công!`,'legendary');this.onProfileChange?.(this.profile);}
-    if(event.type==='breakthrough:failed'&&event.playerId===this.socket?.id){this.syncBreakthrough({status:'failed',wave:event.wave});this.toast('Độ kiếp thất bại · hãy hồi phục và thử lại.','error');}
+    if(event.type==='breakthrough:failed'&&event.playerId===this.socket?.id){if(event.cultivationSystem)this.syncCultivation(event.cultivationSystem,true);if(event.skillSystem)this.syncSkills(event.skillSystem);this.syncBreakthrough({status:'failed',...event});const fallback=event.targetRealmId==='spirit_transformation'?'Nguyên Anh tầng 2':'Kim Đan tầng 2';this.toast(`Độ kiếp thất bại · tu vi trở về ${fallback}.`,'error');}
   }
   blockImpact(parry=false){const a=this.player.aimAngle;for(let i=0;i<10;i++)this.effects.push({type:'spark',x:this.player.position.x+Math.cos(a),z:this.player.position.z+Math.sin(a),dx:Math.cos(a)+(Math.random()-.5),dz:Math.sin(a)+(Math.random()-.5),life:.3,max:.3,color:parry?'#fff2a0':'#bff6ff'});this.audio?.play('block');}
 
@@ -398,7 +403,7 @@ export class CultivationGame {
   spawnExpPickup(amount){this.damageNumbers.push({x:this.player.position.x,z:this.player.position.z,value:`+${Math.round(amount)} EXP`,exp:true,life:1.2,max:1.2});for(let i=0;i<5;i++)this.effects.push({type:'spirit',x:this.player.position.x+(Math.random()-.5),z:this.player.position.z+(Math.random()-.5),life:.7+Math.random()*.25,max:1,color:'#72eaff'});}
   dropGoldFromEvent(amount,event){const enemy=this.enemies.get(event?.enemyId),position=enemy?.position??this.player.position;this.goldDropSystem.spawnGoldLoot(position.x,position.z,amount,{boss:Boolean(enemy?.isBoss)});}
   collectGold(amount){this.spawnGoldPickup(amount);this.syncServerGold({gold:this.shopSystem.gold});}
-  ensureTribulationUI(){if(this.tribulationUI)return;const el=document.createElement('section');el.className='screen-overlay tribulation-overlay';el.hidden=true;el.innerHTML=`<div class="tribulation-card"><small>THIÊN ĐẠO GIÁNG LÂM</small><h2>Độ Kiếp</h2><div class="tribulation-timing"><i></i><b></b></div><p>Quan sát vùng sét và dùng WASD hoặc Space để né. Chỉ cần vượt qua ${TRIBULATION_WAVES} đợt.</p><strong data-wave>Thiên Lôi 1 / ${TRIBULATION_WAVES}</strong></div>`;this.ui.app.appendChild(el);this.tribulationUI=el;this.hudManager.register('tribulation',el);}
+  ensureTribulationUI(){return this.tribulationUI;}
   updateHudVisibility(){const panel=document.querySelector('.player-panel');panel?.classList.remove('is-collapsed');this.ui.hud?.removeAttribute('hidden');this.ui.hud?.classList.add('is-visible');if(this.ui.goldCount)this.ui.goldCount.textContent=Math.floor(this.shopSystem.gold);this.profile.realmName=this.cultivationSystem.displayName;if(this.ui.realmName)this.ui.realmName.textContent=this.profile.realmName;}
 
   ensureGoldCounter(){const details=document.querySelector('.player-panel .player-details');if(!details||document.getElementById('gold-count'))return;const el=document.createElement('div');el.className='gold-counter';el.innerHTML='🪙 <b id="gold-count">0</b> <span>Vàng</span>';details.appendChild(el);this.ui.goldCount=el.querySelector('b');}
@@ -492,5 +497,5 @@ export class CultivationGame {
   toast(message,tone='info'){if(!message||!this.ui.toastStack)return;const el=document.createElement('div');el.className=`toast toast--${tone} is-visible`;el.setAttribute('role',tone==='error'?'alert':'status');el.textContent=message;this.ui.toastStack.appendChild(el);setTimeout(()=>el.remove(),2600);}
   resize(){const scale=Math.max(2,Math.floor(Math.min(innerWidth/480,innerHeight/270)));this.canvas.width=Math.max(320,Math.floor(innerWidth/scale));this.canvas.height=Math.max(180,Math.floor(innerHeight/scale));this.ctx.imageSmoothingEnabled=false;}
   loop(time){if(!this.state.running)return;this.frameRequest=requestAnimationFrame(this.bound.loop);const elapsed=Math.max(0,(time-this.lastFrame)/1000);this.lastFrame=time;const dt=Math.min(.05,elapsed);try{if(!this.state.paused&&!this.player.getFeedback(time).hitStopped)this.update(dt);this.render();this.updateUI();}catch(error){console.error('Game frame recovered after an error:',error);}}
-  destroy(){if(this.destroyed)return;this.destroyed=true;this.state.running=false;this.keys.clear();if(this.frameRequest)cancelAnimationFrame(this.frameRequest);this.mapManager?.destroy();this.goldDropSystem?.clear();this.vfxManager?.clear();this.uiManager?.destroy();this.skillTreePanel?.destroy();this.cleanup.splice(0).forEach(remove=>remove());for(const overlay of [this.shopUI,this.inventoryUI,this.tribulationUI,this.touchControls])overlay?.remove();this.socket?.disconnect();}
+  destroy(){if(this.destroyed)return;this.destroyed=true;this.state.running=false;this.keys.clear();if(this.frameRequest)cancelAnimationFrame(this.frameRequest);this.mapManager?.destroy();this.goldDropSystem?.clear();this.vfxManager?.clear();this.uiManager?.destroy();this.skillTreePanel?.destroy();this.tribulationScreen?.destroy();this.cleanup.splice(0).forEach(remove=>remove());for(const overlay of [this.shopUI,this.inventoryUI,this.touchControls])overlay?.remove();this.socket?.disconnect();}
 }

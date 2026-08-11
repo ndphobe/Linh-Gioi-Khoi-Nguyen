@@ -33,7 +33,13 @@ export const SAFE_ZONE = Object.freeze({
 });
 
 export const BREAKTHROUGH_ALTAR = Object.freeze({ x: 0, y: 0, z: 23, radius: 8 });
-export const BREAKTHROUGH_WAVES = 2;
+export const BREAKTHROUGH_WAVES = 10;
+export const TRIBULATION_PROFILES = Object.freeze({
+  nascent_soul: Object.freeze({ maxHits: 3, fallbackLevel: 6, telegraphMs: 1_150, intervalMs: 550, radius: 0.13, intensity: 1 }),
+  spirit_transformation: Object.freeze({ maxHits: 2, fallbackLevel: 8, telegraphMs: 850, intervalMs: 400, radius: 0.14, intensity: 1.45 }),
+});
+const TRIBULATION_PLAYER_RADIUS = 0.055;
+const TRIBULATION_MOVE_SPEED = 1.35;
 
 const PLAYER_SPAWNS = Object.freeze([
   Object.freeze({ x: -4, y: 0, z: 27 }),
@@ -324,10 +330,10 @@ const realmSnapshot = cultivationSystem => {
 };
 
 const FAST_TRAVEL_REGIONS = Object.freeze({
-  sect_hall: Object.freeze({ requiredOrder: 0, mapOrder: 0, portal: { x: 0, y: 0, z: 26 }, townGate: { x: 0, y: 0, z: 26 } }),
-  luoyang: Object.freeze({ requiredOrder: 1, mapOrder: 1, portal: { x: 28, y: 0, z: -8 }, townGate: { x: 25, y: 0, z: -5 } }),
-  spirit_mine: Object.freeze({ requiredOrder: 1, mapOrder: 2, portal: { x: 18, y: 0, z: 34 }, townGate: { x: 16, y: 0, z: 31 } }),
-  heaven_sect: Object.freeze({ requiredOrder: 2, mapOrder: 3, portal: { x: -30, y: 0, z: -18 }, townGate: { x: -27, y: 0, z: -16 } }),
+  sect_hall: Object.freeze({ requiredOrder: 0, requiredStage: 1, mapOrder: 0, portal: { x: 0, y: 0, z: 26 }, townGate: { x: 0, y: 0, z: 26 } }),
+  luoyang: Object.freeze({ requiredOrder: 1, requiredStage: 1, mapOrder: 1, portal: { x: 28, y: 0, z: -8 }, townGate: { x: 25, y: 0, z: -5 } }),
+  spirit_mine: Object.freeze({ requiredOrder: 1, requiredStage: 3, mapOrder: 2, portal: { x: 18, y: 0, z: 34 }, townGate: { x: 16, y: 0, z: 31 } }),
+  heaven_sect: Object.freeze({ requiredOrder: 2, requiredStage: 1, mapOrder: 3, portal: { x: -30, y: 0, z: -18 }, townGate: { x: -27, y: 0, z: -16 } }),
 });
 
 function gameError(code, message) {
@@ -513,12 +519,19 @@ function sanitizeSession(value) {
     },
     breakthrough: {
       status: breakthroughStatus,
-      wave: clamp(Math.floor(finiteNumber(breakthroughSource.wave)), 0, 3),
+      wave: clamp(Math.floor(finiteNumber(breakthroughSource.wave)), 0, BREAKTHROUGH_WAVES),
+      hits: clamp(Math.floor(finiteNumber(breakthroughSource.hits)), 0, BREAKTHROUGH_WAVES),
+      maxHits: clamp(Math.floor(finiteNumber(breakthroughSource.maxHits, 3)), 0, BREAKTHROUGH_WAVES),
+      dodgeX: clamp(finiteNumber(breakthroughSource.dodgeX), -1, 1),
+      moveDirection: 0,
+      lastMoveAt: 0,
+      targetLevel: clamp(Math.floor(finiteNumber(breakthroughSource.targetLevel)), 0, 16),
+      targetRealmId: Object.hasOwn(TRIBULATION_PROFILES, breakthroughSource.targetRealmId) ? breakthroughSource.targetRealmId : null,
       startedAt: Math.max(0, finiteNumber(breakthroughSource.startedAt)),
       nextAt: Math.max(0, finiteNumber(breakthroughSource.nextAt)),
       telegraph: isObject(breakthroughSource.telegraph) ? {
-        position: clampPosition(breakthroughSource.telegraph.position),
-        radius: clamp(finiteNumber(breakthroughSource.telegraph.radius, 3), 1, 8),
+        strikeX: clamp(finiteNumber(breakthroughSource.telegraph.strikeX), -1, 1),
+        radius: clamp(finiteNumber(breakthroughSource.telegraph.radius, 0.13), 0.08, 0.2),
         resolveAt: Math.max(0, finiteNumber(breakthroughSource.telegraph.resolveAt)),
       } : null,
     },
@@ -670,11 +683,15 @@ function serializeBreakthrough(breakthrough) {
   return {
     status: breakthrough.status,
     wave: breakthrough.wave,
+    hits: breakthrough.hits ?? 0,
+    maxHits: breakthrough.maxHits ?? 0,
+    dodgeX: breakthrough.dodgeX ?? 0,
+    targetRealmId: breakthrough.targetRealmId ?? null,
     startedAt: breakthrough.startedAt || null,
     nextAt: breakthrough.nextAt || null,
     telegraph: breakthrough.telegraph
       ? {
-          position: copyPosition(breakthrough.telegraph.position),
+          strikeX: breakthrough.telegraph.strikeX,
           radius: breakthrough.telegraph.radius,
           resolveAt: breakthrough.telegraph.resolveAt,
         }
@@ -837,6 +854,9 @@ export class GameRoom {
   updatePlayerMove(id, payload, now = Date.now()) {
     const player = this.requirePlayer(id);
     if (!player.alive) throw gameError("PLAYER_DEAD", "Không thể di chuyển khi đang trọng thương.");
+    if (player.breakthrough.status !== "idle" && player.breakthrough.status !== "failed") {
+      throw gameError("ACTION_BLOCKED", "Hãy dùng A/D để né thiên lôi trong màn độ kiếp.");
+    }
     if (!isObject(payload) || !isObject(payload.position)) {
       throw gameError("INVALID_MOVE", "Dữ liệu di chuyển không hợp lệ.");
     }
@@ -1261,6 +1281,8 @@ export class GameRoom {
     if (player.qi < player.maxQi) {
       throw gameError("NOT_ENOUGH_QI", `Cần tích đủ ${player.maxQi} Chân Khí.`);
     }
+    const profile = TRIBULATION_PROFILES[gate.targetRealmId];
+    if (!profile) throw gameError("INVALID_TRIBULATION", "Thiên kiếp này chưa được cấu hình.");
     player.qi = 0;
     player.meditating = false;
     player.isFlying = false;
@@ -1268,6 +1290,11 @@ export class GameRoom {
     player.breakthrough = {
       status: "active",
       wave: 0,
+      hits: 0,
+      maxHits: profile.maxHits,
+      dodgeX: 0,
+      moveDirection: 0,
+      lastMoveAt: now,
       startedAt: now,
       nextAt: now + 700,
       telegraph: null,
@@ -1277,6 +1304,8 @@ export class GameRoom {
     this.pushEvent("breakthrough:started", {
       playerId: id,
       waves: BREAKTHROUGH_WAVES,
+      maxHits: profile.maxHits,
+      targetRealmId: gate.targetRealmId,
       nextWaveAt: player.breakthrough.nextAt,
     }, now);
     return serializePublicPlayer(player, now);
@@ -1300,10 +1329,18 @@ export class GameRoom {
       player.hp = Math.min(player.maxHp, player.hp + deltaSeconds * 5);
       this.grantCultivationEXP(player, deltaSeconds * 8, "meditation");
     }
-    this.tickBreakthrough(player, now);
+    this.tickBreakthrough(player, deltaSeconds, now);
   }
 
-  tickBreakthrough(player, now) {
+  updateBreakthroughMove(id, payload = {}, now = Date.now()) {
+    const player = this.requirePlayer(id);
+    if (player.breakthrough.status !== "active") return serializeBreakthrough(player.breakthrough);
+    player.breakthrough.moveDirection = clamp(finiteNumber(payload.direction), -1, 1);
+    player.breakthrough.lastMoveAt = now;
+    return serializeBreakthrough(player.breakthrough);
+  }
+
+  tickBreakthrough(player, deltaSeconds, now) {
     const state = player.breakthrough;
     if (state.status === "idle" || state.status === "failed") return;
 
@@ -1312,31 +1349,25 @@ export class GameRoom {
       return;
     }
 
+    if (now - state.lastMoveAt > 180) state.moveDirection = 0;
+    state.dodgeX = clamp(state.dodgeX + state.moveDirection * TRIBULATION_MOVE_SPEED * deltaSeconds, -1, 1);
+    const profile = TRIBULATION_PROFILES[state.targetRealmId] ?? TRIBULATION_PROFILES.nascent_soul;
+
     if (!state.telegraph && state.wave < BREAKTHROUGH_WAVES && now >= state.nextAt) {
       state.wave += 1;
-      const jitterAngle = this.random() * Math.PI * 2;
-      const jitterDistance = this.random() * 0.45;
-      const strikePosition = {
-        x: clamp(
-          player.position.x + Math.cos(jitterAngle) * jitterDistance,
-          WORLD_BOUNDS.minX,
-          WORLD_BOUNDS.maxX,
-        ),
-        y: 0,
-        z: clamp(
-          player.position.z + Math.sin(jitterAngle) * jitterDistance,
-          WORLD_BOUNDS.minZ,
-          WORLD_BOUNDS.maxZ,
-        ),
-      };
+      const targetJitter = (this.random() - 0.5) * 0.18;
       state.telegraph = {
-        position: strikePosition,
-        radius: 2.1 + state.wave * 0.15,
-        resolveAt: now + 1_200,
+        strikeX: clamp(state.dodgeX + targetJitter, -0.9, 0.9),
+        radius: profile.radius,
+        resolveAt: now + profile.telegraphMs,
       };
       this.pushEvent("breakthrough:telegraph", {
         playerId: player.id,
         wave: state.wave,
+        hits: state.hits,
+        maxHits: state.maxHits,
+        targetRealmId: state.targetRealmId,
+        intensity: profile.intensity,
         ...state.telegraph,
       }, now);
       return;
@@ -1344,25 +1375,27 @@ export class GameRoom {
 
     if (state.telegraph && now >= state.telegraph.resolveAt) {
       const telegraph = state.telegraph;
-      const hit = horizontalDistance(player.position, telegraph.position) <= telegraph.radius;
-      if (hit) {
-        this.damagePlayer(player, 18, { kind: "lightning", id: `tribulation-${state.wave}` }, now);
-      }
+      const hit = Math.abs(state.dodgeX - telegraph.strikeX) <= telegraph.radius + TRIBULATION_PLAYER_RADIUS;
+      if (hit) state.hits += 1;
       this.pushEvent("breakthrough:strike", {
         playerId: player.id,
         wave: state.wave,
-        position: copyPosition(telegraph.position),
+        strikeX: telegraph.strikeX,
         radius: telegraph.radius,
         hit,
+        hits: state.hits,
+        maxHits: state.maxHits,
+        targetRealmId: state.targetRealmId,
+        intensity: profile.intensity,
       }, now);
       state.telegraph = null;
 
-      if (!player.alive) return;
+      if (state.hits > state.maxHits) return this.failBreakthrough(player, "too-many-lightning-hits", now);
       if (state.wave >= BREAKTHROUGH_WAVES) {
         state.status = "resolving";
         state.nextAt = now + 550;
       } else {
-        state.nextAt = now + 650;
+        state.nextAt = now + profile.intervalMs;
       }
     }
   }
@@ -1378,6 +1411,9 @@ export class GameRoom {
     player.breakthrough = {
       status: "idle",
       wave: BREAKTHROUGH_WAVES,
+      hits: player.breakthrough.hits,
+      maxHits: player.breakthrough.maxHits,
+      dodgeX: player.breakthrough.dodgeX,
       startedAt: 0,
       nextAt: 0,
       telegraph: null,
@@ -1393,14 +1429,31 @@ export class GameRoom {
 
   failBreakthrough(player, reason, now) {
     if (player.breakthrough.status === "idle" || player.breakthrough.status === "failed") return;
+    const previous = player.breakthrough;
+    const profile = TRIBULATION_PROFILES[previous.targetRealmId] ?? TRIBULATION_PROFILES.nascent_soul;
+    player.cultivationSystem.sync({ level: profile.fallbackLevel, currentExp: 0, baseEXP: CULTIVATION_BASE_EXP, realmMultiplier: CULTIVATION_REALM_MULTIPLIER, version: 3 });
+    this.syncCultivationFields(player);
     player.breakthrough = {
       status: "failed",
-      wave: player.breakthrough.wave,
-      startedAt: player.breakthrough.startedAt,
+      wave: previous.wave,
+      hits: previous.hits,
+      maxHits: previous.maxHits,
+      dodgeX: previous.dodgeX,
+      targetRealmId: previous.targetRealmId,
+      startedAt: previous.startedAt,
       nextAt: 0,
       telegraph: null,
     };
-    this.pushEvent("breakthrough:failed", { playerId: player.id, reason }, now);
+    this.pushEvent("breakthrough:failed", {
+      playerId: player.id,
+      reason,
+      wave: previous.wave,
+      hits: previous.hits,
+      targetRealmId: previous.targetRealmId,
+      fallbackLevel: profile.fallbackLevel,
+      cultivationSystem: player.cultivationSystem.serialize(),
+      skillSystem: player.skillSystem.serialize(),
+    }, now);
   }
 
   tickEnemy(enemy, deltaSeconds, now) {
@@ -1636,6 +1689,9 @@ export class GameRoom {
       player.breakthrough = {
         status: "idle",
         wave: 0,
+        hits: 0,
+        maxHits: 0,
+        dodgeX: 0,
         startedAt: 0,
         nextAt: 0,
         telegraph: null,
@@ -1678,7 +1734,10 @@ export class GameRoom {
     const region = FAST_TRAVEL_REGIONS[regionId];
     if (!region) throw gameError('INVALID_REGION', 'Khu vực không tồn tại.');
     if (!player.alive || player.breakthrough.status !== 'idle') throw gameError('ACTION_BLOCKED', 'Không thể dịch chuyển lúc này.');
-    if (player.realm.order < region.requiredOrder) throw gameError('REALM_REQUIRED', 'Cảnh giới chưa đủ để đến khu vực này.');
+    const belowRequiredRealm = player.realm.order < region.requiredOrder;
+    const belowRequiredStage = player.realm.order === region.requiredOrder
+      && player.cultivationSystem.subStage < region.requiredStage;
+    if (belowRequiredRealm || belowRequiredStage) throw gameError('REALM_REQUIRED', 'Cảnh giới hoặc cấp tu luyện chưa đủ để đến khu vực này.');
     const destination = player.currentRegion === regionId ? region.portal : region.townGate;
     player.position = copyPosition(destination);
     player.currentRegion = regionId;

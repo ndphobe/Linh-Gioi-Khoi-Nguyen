@@ -108,7 +108,15 @@ test("fast travel is realm-gated and uses town gates then local portals", () => 
   assert.deepEqual(first.position, { x: 25, y: 0, z: -5 });
   const second = room.fastTravel("traveler", "luoyang", 1_200);
   assert.deepEqual(second.position, { x: 28, y: 0, z: -8 });
+  assert.throws(() => room.fastTravel("traveler", "spirit_mine", 1_250), error=>error.code==='REALM_REQUIRED');
+  player.cultivationSystem.sync({level:4,currentExp:0});
+  room.syncCultivationFields(player);
+  assert.throws(() => room.fastTravel("traveler", "spirit_mine", 1_275), error=>error.code==='REALM_REQUIRED');
   assert.throws(() => room.fastTravel("traveler", "heaven_sect", 1_300));
+  player.cultivationSystem.sync({level:5,currentExp:0});
+  room.syncCultivationFields(player);
+  const higherRealm = room.fastTravel("traveler", "spirit_mine", 1_350);
+  assert.deepEqual(higherRealm.position, { x: 16, y: 0, z: 31 });
 });
 
 test("boss loot and cultivation resources are awarded by the room", () => {
@@ -148,19 +156,30 @@ test("server-owned block reduces damage and a timed parry negates it", () => {
   assert.equal(heldBlock, 9);
 });
 
-test("two forgiving lightning waves unlock Nguyên Anh without enabling flight", () => {
+const runTribulationDodgingEveryStrike=(room,player,start,end)=>{
+  let dodgedWave=0,direction=0;
+  for(let now=start;now<=end;now+=50){
+    room.tick(now);
+    const telegraph=player.breakthrough.telegraph;
+    if(telegraph){
+      if(player.breakthrough.wave!==dodgedWave){
+        dodgedWave=player.breakthrough.wave;
+        direction=player.breakthrough.dodgeX<=-.8?1:player.breakthrough.dodgeX>=.8?-1:telegraph.strikeX>=player.breakthrough.dodgeX?-1:1;
+      }
+      room.updateBreakthroughMove(player.id,{direction},now);
+    }else if(player.breakthrough.status==='active'){direction=0;room.updateBreakthroughMove(player.id,{direction},now);}
+  }
+};
+
+test("ten dodged lightning waves unlock Nguyên Anh without enabling flight", () => {
   const room = new GameRoom("REALM", { random: () => 0.5 });
   const player = room.addPlayer("p1", { name: "Độ Kiếp" }, 1_000);
   player.cultivationSystem.sync({version:3,level:6,currentExp:999_999});
   room.syncCultivationFields(player);
   player.position = { x: 35, y: 0, z: -20 };
   player.qi = player.maxQi;
-  // Unit-level invulnerability isolates the lifecycle from dodge mechanics;
-  // movement and dash validation are covered independently.
-  player.invulnerableUntil = 20_000;
-
   room.startBreakthrough(player.id, 1_000);
-  for (let now = 1_000; now <= 8_000; now += 50) room.tick(now);
+  runTribulationDodgingEveryStrike(room,player,1_000,25_000);
 
   assert.equal(player.realm.id, "nascent_soul");
   assert.equal(player.flightUnlocked, false);
@@ -173,19 +192,58 @@ test("two forgiving lightning waves unlock Nguyên Anh without enabling flight",
   assert.equal(strikes.length, BREAKTHROUGH_WAVES);
 });
 
-test("the second and only later tribulation unlocks Hóa Thần",()=>{
+test("the faster second tribulation unlocks Hóa Thần after ten dodged waves",()=>{
   const room=new GameRoom('SPIRIT-GATE',{random:()=>0.5});
   const player=room.addPlayer('p1',{session:{flightUnlocked:true,cultivationSystem:{version:3,level:10,currentExp:999_999}}},1_000);
   room.syncCultivationFields(player);
-  player.invulnerableUntil=20_000;
   room.startBreakthrough(player.id,1_000);
-  for(let now=1_000;now<=8_000;now+=50)room.tick(now);
+  runTribulationDodgingEveryStrike(room,player,1_000,20_000);
   assert.equal(player.realm.id,'spirit_transformation');
   assert.equal(player.cultivationSystem.level,11);
   assert.equal(player.flightUnlocked,true);
   const ungated=room.addPlayer('p2',{session:{cultivationSystem:{version:3,level:4,currentExp:999_999}}},9_000);
   room.syncCultivationFields(ungated);
   assert.throws(()=>room.startBreakthrough(ungated.id,9_100),error=>error.code==='REALM_REQUIRED');
+});
+
+test("Nguyên Anh tribulation fails on the fourth hit and falls back to Kim Đan tầng 2",()=>{
+  const room=new GameRoom('NASCENT-FAIL',{random:()=>0.5});
+  const player=room.addPlayer('p1',{session:{cultivationSystem:{version:3,level:6,currentExp:999_999}}},1_000);
+  room.syncCultivationFields(player);player.qi=player.maxQi;room.startBreakthrough(player.id,1_000);
+  for(let now=1_000;now<=12_000&&player.breakthrough.status==='active';now+=50)room.tick(now);
+  assert.equal(player.breakthrough.status,'failed');
+  assert.equal(player.breakthrough.hits,4);
+  assert.equal(player.cultivationSystem.level,6);
+  assert.equal(player.cultivationSystem.currentExp,0);
+  const failed=room.drainEvents().find(event=>event.type==='breakthrough:failed');
+  assert.equal(failed.fallbackLevel,6);
+});
+
+test("tribulation collision stops at the visible strike zone plus the player's foot radius",()=>{
+  const room=new GameRoom('HITBOX-EDGE',{random:()=>0.5});
+  const player=room.addPlayer('p1',{session:{cultivationSystem:{version:3,level:6,currentExp:999_999}}},1_000);
+  room.syncCultivationFields(player);player.qi=player.maxQi;room.startBreakthrough(player.id,1_000);
+  player.breakthrough.wave=1;player.breakthrough.dodgeX=.186;player.breakthrough.nextAt=0;
+  player.breakthrough.telegraph={strikeX:0,radius:.13,resolveAt:1_100};
+  room.tick(1_100);
+  const strike=room.drainEvents().find(event=>event.type==='breakthrough:strike');
+  assert.equal(strike.hit,false);
+  assert.equal(player.breakthrough.hits,0);
+});
+
+test("Hóa Thần tribulation fails on the third hit and falls back to Nguyên Anh tầng 2",()=>{
+  const room=new GameRoom('ASCENSION-FAIL',{random:()=>0.5});
+  const player=room.addPlayer('p1',{session:{cultivationSystem:{version:3,level:10,currentExp:999_999}}},1_000);
+  room.syncCultivationFields(player);player.qi=player.maxQi;room.startBreakthrough(player.id,1_000);
+  for(let now=1_000;now<=9_000&&player.breakthrough.status==='active';now+=50)room.tick(now);
+  assert.equal(player.breakthrough.status,'failed');
+  assert.equal(player.breakthrough.hits,3);
+  assert.equal(player.cultivationSystem.level,8);
+  assert.equal(player.cultivationSystem.currentExp,0);
+  assert.equal(player.skillSystem.lastCultivationLevel,8);
+  assert.equal(player.skillSystem.realmId,'nascent_soul');
+  const failed=room.drainEvents().find(event=>event.type==='breakthrough:failed');
+  assert.equal(failed.fallbackLevel,8);
 });
 
 test("high cultivation reduces EXP efficiency",()=>{
