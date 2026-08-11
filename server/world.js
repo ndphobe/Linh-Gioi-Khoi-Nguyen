@@ -238,15 +238,16 @@ export function monsterScaleForWave(wave = 1, level = 1, mapOrder = 0) {
   const stage = clamp(Math.floor(finiteNumber(level, 1)), 1, 5);
   const map = Math.max(0, Math.floor(finiteNumber(mapOrder, 0)));
   const roundStep = Math.min(24, round - 1);
+  const progressionStep = roundStep * 5 + stage - 1;
   return Object.freeze({
     round,
     level: stage,
     mapOrder: map,
     combatLevel: map * 5 + roundStep * 5 + stage,
-    hp: (1 + map * .9) * (1.62 ** roundStep) * (1 + (stage - 1) * .18),
-    damage: (1 + map * .58) * (1.4 ** roundStep) * (1 + (stage - 1) * .12),
-    speed: Math.min(1.75, (1 + map * .055) * (1 + roundStep * .018) * (1 + (stage - 1) * .012)),
-    reward: (1 + map * .62) * (1.3 ** roundStep) * (1 + (stage - 1) * .1),
+    hp: (1 + map * .9) * (1.16 ** progressionStep),
+    damage: (1 + map * .58) * (1.12 ** progressionStep),
+    speed: Math.min(1.75, (1 + map * .055) * (1.012 ** progressionStep)),
+    reward: (1 + map * .62) * (1.1 ** progressionStep),
   });
 }
 
@@ -530,8 +531,15 @@ function sanitizeSession(value) {
       startedAt: Math.max(0, finiteNumber(breakthroughSource.startedAt)),
       nextAt: Math.max(0, finiteNumber(breakthroughSource.nextAt)),
       telegraph: isObject(breakthroughSource.telegraph) ? {
-        strikeX: clamp(finiteNumber(breakthroughSource.telegraph.strikeX), -1, 1),
-        radius: clamp(finiteNumber(breakthroughSource.telegraph.radius, 0.13), 0.08, 0.2),
+        strikes: Array.isArray(breakthroughSource.telegraph.strikes) ? breakthroughSource.telegraph.strikes.slice(0,6).map(strike=>({
+          strikeX: clamp(finiteNumber(strike?.strikeX), -1, 1),
+          radius: clamp(finiteNumber(strike?.radius, 0.13), 0.08, 0.2),
+        })) : [{
+          strikeX: clamp(finiteNumber(breakthroughSource.telegraph.strikeX), -1, 1),
+          radius: clamp(finiteNumber(breakthroughSource.telegraph.radius, 0.13), 0.08, 0.2),
+        }],
+        safeX: clamp(finiteNumber(breakthroughSource.telegraph.safeX), -1, 1),
+        durationMs: clamp(Math.floor(finiteNumber(breakthroughSource.telegraph.durationMs, 1_000)), 550, 1_200),
         resolveAt: Math.max(0, finiteNumber(breakthroughSource.telegraph.resolveAt)),
       } : null,
     },
@@ -691,8 +699,9 @@ function serializeBreakthrough(breakthrough) {
     nextAt: breakthrough.nextAt || null,
     telegraph: breakthrough.telegraph
       ? {
-          strikeX: breakthrough.telegraph.strikeX,
-          radius: breakthrough.telegraph.radius,
+          strikes: breakthrough.telegraph.strikes.map(strike=>({...strike})),
+          safeX: breakthrough.telegraph.safeX,
+          durationMs: breakthrough.telegraph.durationMs,
           resolveAt: breakthrough.telegraph.resolveAt,
         }
       : null,
@@ -1355,11 +1364,19 @@ export class GameRoom {
 
     if (!state.telegraph && state.wave < BREAKTHROUGH_WAVES && now >= state.nextAt) {
       state.wave += 1;
-      const targetJitter = (this.random() - 0.5) * 0.18;
+      const lanes=[-.84,-.56,-.28,0,.28,.56,.84];
+      const durationMs=Math.max(600,profile.telegraphMs-(state.wave-1)*22);
+      const maximumReach=TRIBULATION_MOVE_SPEED*(durationMs/1_000)*.82;
+      const reachableSafeLanes=lanes.filter(lane=>Math.abs(lane-state.dodgeX)<=maximumReach);
+      const safeX=reachableSafeLanes[Math.min(reachableSafeLanes.length-1,Math.floor(this.random()*reachableSafeLanes.length))]??0;
+      const dangerLanes=lanes.filter(lane=>lane!==safeX);
+      for(let index=dangerLanes.length-1;index>0;index-=1){const swapIndex=Math.floor(this.random()*(index+1));[dangerLanes[index],dangerLanes[swapIndex]]=[dangerLanes[swapIndex],dangerLanes[index]];}
+      const strikeCount=Math.min(6,2+Math.floor((state.wave-1)/2));
       state.telegraph = {
-        strikeX: clamp(state.dodgeX + targetJitter, -0.9, 0.9),
-        radius: profile.radius,
-        resolveAt: now + profile.telegraphMs,
+        strikes: dangerLanes.slice(0,strikeCount).map(strikeX=>({strikeX,radius:profile.radius})),
+        safeX,
+        durationMs,
+        resolveAt: now + durationMs,
       };
       this.pushEvent("breakthrough:telegraph", {
         playerId: player.id,
@@ -1375,13 +1392,14 @@ export class GameRoom {
 
     if (state.telegraph && now >= state.telegraph.resolveAt) {
       const telegraph = state.telegraph;
-      const hit = Math.abs(state.dodgeX - telegraph.strikeX) <= telegraph.radius + TRIBULATION_PLAYER_RADIUS;
+      const hitIndexes=telegraph.strikes.map((strike,index)=>Math.abs(state.dodgeX-strike.strikeX)<=strike.radius+TRIBULATION_PLAYER_RADIUS?index:-1).filter(index=>index>=0);
+      const hit=hitIndexes.length>0;
       if (hit) state.hits += 1;
       this.pushEvent("breakthrough:strike", {
         playerId: player.id,
         wave: state.wave,
-        strikeX: telegraph.strikeX,
-        radius: telegraph.radius,
+        strikes: telegraph.strikes.map(strike=>({...strike})),
+        hitIndexes,
         hit,
         hits: state.hits,
         maxHits: state.maxHits,

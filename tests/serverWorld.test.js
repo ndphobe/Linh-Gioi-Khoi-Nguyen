@@ -50,6 +50,15 @@ test("monster balance applies requested nerfs and trash mobs die in 2-3 basic hi
   assert.equal(fox.alive, false);
 });
 
+test("monster HP and damage increase at every level and across round boundaries",()=>{
+  const progression=[];
+  for(let round=1;round<=4;round+=1)for(let level=1;level<=5;level+=1)progression.push(monsterScaleForWave(round,level,0));
+  for(let index=1;index<progression.length;index+=1){
+    assert.ok(progression[index].hp>progression[index-1].hp,`HP did not rise at combat level ${progression[index].combatLevel}`);
+    assert.ok(progression[index].damage>progression[index-1].damage,`damage did not rise at combat level ${progression[index].combatLevel}`);
+  }
+});
+
 test("join identity is sanitized and rooms never exceed eight players", () => {
   const room = new GameRoom("demo-01");
   for (let index = 0; index < 8; index += 1) {
@@ -157,17 +166,14 @@ test("server-owned block reduces damage and a timed parry negates it", () => {
 });
 
 const runTribulationDodgingEveryStrike=(room,player,start,end)=>{
-  let dodgedWave=0,direction=0;
   for(let now=start;now<=end;now+=50){
     room.tick(now);
     const telegraph=player.breakthrough.telegraph;
     if(telegraph){
-      if(player.breakthrough.wave!==dodgedWave){
-        dodgedWave=player.breakthrough.wave;
-        direction=player.breakthrough.dodgeX<=-.8?1:player.breakthrough.dodgeX>=.8?-1:telegraph.strikeX>=player.breakthrough.dodgeX?-1:1;
-      }
+      const difference=telegraph.safeX-player.breakthrough.dodgeX;
+      const direction=Math.abs(difference)<.045?0:Math.sign(difference);
       room.updateBreakthroughMove(player.id,{direction},now);
-    }else if(player.breakthrough.status==='active'){direction=0;room.updateBreakthroughMove(player.id,{direction},now);}
+    }else if(player.breakthrough.status==='active')room.updateBreakthroughMove(player.id,{direction:0},now);
   }
 };
 
@@ -190,6 +196,7 @@ test("ten dodged lightning waves unlock Nguyên Anh without enabling flight", ()
   assert.equal(player.inventory.hoTamDan, 0);
   const strikes = room.drainEvents().filter((event) => event.type === "breakthrough:strike");
   assert.equal(strikes.length, BREAKTHROUGH_WAVES);
+  assert.deepEqual(strikes.map(event=>event.strikes.length),[2,2,3,3,4,4,5,5,6,6]);
 });
 
 test("the faster second tribulation unlocks Hóa Thần after ten dodged waves",()=>{
@@ -210,7 +217,7 @@ test("Nguyên Anh tribulation fails on the fourth hit and falls back to Kim Đan
   const room=new GameRoom('NASCENT-FAIL',{random:()=>0.5});
   const player=room.addPlayer('p1',{session:{cultivationSystem:{version:3,level:6,currentExp:999_999}}},1_000);
   room.syncCultivationFields(player);player.qi=player.maxQi;room.startBreakthrough(player.id,1_000);
-  for(let now=1_000;now<=12_000&&player.breakthrough.status==='active';now+=50)room.tick(now);
+  for(let now=1_000;now<=12_000&&player.breakthrough.status==='active';now+=50){room.tick(now);if(player.breakthrough.telegraph)player.breakthrough.dodgeX=player.breakthrough.telegraph.strikes[0].strikeX;}
   assert.equal(player.breakthrough.status,'failed');
   assert.equal(player.breakthrough.hits,4);
   assert.equal(player.cultivationSystem.level,6);
@@ -224,7 +231,7 @@ test("tribulation collision stops at the visible strike zone plus the player's f
   const player=room.addPlayer('p1',{session:{cultivationSystem:{version:3,level:6,currentExp:999_999}}},1_000);
   room.syncCultivationFields(player);player.qi=player.maxQi;room.startBreakthrough(player.id,1_000);
   player.breakthrough.wave=1;player.breakthrough.dodgeX=.186;player.breakthrough.nextAt=0;
-  player.breakthrough.telegraph={strikeX:0,radius:.13,resolveAt:1_100};
+  player.breakthrough.telegraph={strikes:[{strikeX:0,radius:.13}],safeX:.56,durationMs:100,resolveAt:1_100};
   room.tick(1_100);
   const strike=room.drainEvents().find(event=>event.type==='breakthrough:strike');
   assert.equal(strike.hit,false);
@@ -235,7 +242,7 @@ test("Hóa Thần tribulation fails on the third hit and falls back to Nguyên A
   const room=new GameRoom('ASCENSION-FAIL',{random:()=>0.5});
   const player=room.addPlayer('p1',{session:{cultivationSystem:{version:3,level:10,currentExp:999_999}}},1_000);
   room.syncCultivationFields(player);player.qi=player.maxQi;room.startBreakthrough(player.id,1_000);
-  for(let now=1_000;now<=9_000&&player.breakthrough.status==='active';now+=50)room.tick(now);
+  for(let now=1_000;now<=9_000&&player.breakthrough.status==='active';now+=50){room.tick(now);if(player.breakthrough.telegraph)player.breakthrough.dodgeX=player.breakthrough.telegraph.strikes[0].strikeX;}
   assert.equal(player.breakthrough.status,'failed');
   assert.equal(player.breakthrough.hits,3);
   assert.equal(player.cultivationSystem.level,8);
