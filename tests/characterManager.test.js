@@ -16,6 +16,23 @@ test('each sect character keeps isolated cultivation and economy data',()=>{
   assert.equal(restored.resumeToken,sword.resumeToken);
 });
 
+test('a late update from the previous character cannot overwrite active character gold',()=>{
+  const data=new Map(),storage={getItem:key=>data.get(key)??null,setItem:(key,value)=>data.set(key,value)};
+  const manager=new CharacterManager(new SaveSystem(storage,'characters'));
+  const sword=manager.selectByFaction('orthodox','Kiếm Tu');
+  manager.updateActive({characterId:sword.id,shopSystem:{gold:125}});
+  const demon=manager.selectByFaction('demonic','Ma Tu');
+  manager.updateActive({characterId:demon.id,shopSystem:{gold:40}});
+
+  // Simulate a delayed player:state/onProfileChange callback from Kiếm Tu.
+  manager.updateActive({characterId:sword.id,shopSystem:{gold:180}});
+
+  assert.equal(manager.active().id,demon.id);
+  assert.equal(manager.active().gold,40);
+  manager.selectByFaction('orthodox','Kiếm Tu');
+  assert.equal(manager.active().gold,180);
+});
+
 test('saving remains non-fatal when browser storage is denied',()=>{
   const storage={
     getItem:()=>{throw new Error('SecurityError');},

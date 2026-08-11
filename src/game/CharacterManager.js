@@ -15,7 +15,12 @@ export class CharacterManager{
   selectByFaction(faction,name){const character=this.create(faction,name);if(name)character.name=name;this.activeCharacterId=character.id;this.persist();return clone(character);}
   active(){return this.activeCharacterId?clone(this.characters[this.activeCharacterId]):null;}
   updateActive(profile){
-    const current=this.characters[this.activeCharacterId];if(!current)return null;
+    // Network/UI callbacks from the character that was just closed may arrive
+    // after another character has become active.  Always apply a profile to
+    // the character that owns it instead of blindly using the mutable active
+    // slot; otherwise the previous character's gold can overwrite the new one.
+    const characterId=profile?.characterId??this.activeCharacterId;
+    const current=this.characters[characterId];if(!current)return null;
     const cultivation=profile.cultivationSystem??current.cultivationSystem,realm=cultivation?.realmId??profile.realm??current.realm,minorLevel=cultivation?.subStage??profile.skillSystem?.minorLevel??profile.minorLevel??current.minorLevel;
     Object.assign(current,{name:profile.name??current.name,faction:profile.faction??current.faction,realm,realmName:cultivation?profile.realmName??realmTitle(realm,minorLevel):realmTitle(realm,minorLevel),minorLevel,currentExp:cultivation?.currentExp??profile.skillSystem?.cultivationProgress??profile.qi??current.currentExp,maxExp:cultivation?.requiredEXP??current.maxExp??100,cultivationSystem:cultivation,gold:profile.shopSystem?.gold??profile.gold??current.gold,inventory:[...(profile.shopSystem?.inventory??current.inventory)],equipment:{...current.equipment,...profile.shopSystem?.equipment},allocatedStats:{...current.allocatedStats,...profile.allocatedStats},skillSystem:profile.skillSystem??current.skillSystem,currentRegion:profile.currentRegion??current.currentRegion,resources:{...(current.resources??{}),...(profile.resources??{})}});
     this.persist();return clone(current);
