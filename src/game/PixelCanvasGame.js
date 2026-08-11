@@ -22,7 +22,7 @@ import { TribulationScreen } from './TribulationScreen.js';
 export const PLAYER_MOTION = Object.freeze({
   walkSpeed: 6.2, acceleration: 18, deceleration: 23,
   dashDistance: 4.4, dashDuration: .18, dashCooldown: 1.2, dashIFrames: .32,
-  cameraSharpness: 8.5,
+  cameraSharpness: 6.5,
 });
 
 const COLORS = Object.freeze({
@@ -32,6 +32,7 @@ const COLORS = Object.freeze({
 });
 const KEYS_TO_SLOT = { KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f', KeyG: 'g' };
 const TRIBULATION_WAVES = 10;
+const MOVEMENT_FRAME_COUNT = 8;
 const skillPanelStateSignature=system=>JSON.stringify({
   faction:system.faction,
   realmId:system.realmId,
@@ -56,7 +57,7 @@ export class CultivationGame {
     this.canvas = canvas; this.socket = socket; this.audio = audio;
     this.onProfileChange = onProfileChange; this.onExit = onExit;
     this.profile = { hp: 120, maxHp: 120, mp: 100, maxMp: 100, qi: 0, ...profile, defense: 36, attackSpeed: .02, critRate: .023 };
-    this.ctx = canvas.getContext('2d', { alpha: false });
+    this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true });
     this.ctx.imageSmoothingEnabled = false;
     this.cultivationSystem = new CultivationSystem(this.profile.cultivationSystem ?? {
       realmId: this.profile.realm,
@@ -73,13 +74,20 @@ export class CultivationGame {
     this.state = { running: false, paused: false, meditation: false, dashTime: 0, dashCooldown: 0, invulnerableUntil: 0, joined: false };
     this.profile.resources = { linhThach:0, linhThao:0, linhCot:0, hoTamDan:0, ...(this.profile.resources??{}) };
     this.keys = new Set(); this.enemies = new Map(); this.remotePlayers = new Map();
-    this.effects = []; this.pendingEffects = []; this.damageNumbers = []; this.cooldowns = new Map(); this.cooldownTotals = new Map(); this.pendingCasts = new Set(); this.castWarningTimes = new Map(); this.lastFrame = performance.now(); this.netTime = 0;
+    this.effects = []; this.pendingEffects = []; this.damageNumbers = []; this.cooldowns = new Map(); this.cooldownTotals = new Map(); this.pendingCasts = new Set(); this.castWarningTimes = new Map(); this.lastFrame = performance.now(); this.lastUiFrame = 0; this.netTime = 0;
     this.mouse = { x: 0, y: 0, active: false }; this.pointTarget = null; this.lockedTargetId = null;
     this.hudVisibleUntil = performance.now() + 10_000; this.hudHover = false; this.bossEngaged = false;
     this.bossCombatUntil = 0;
     this.terrainProps = this.createTerrainProps();
     this.sprite = new Image(); this.sprite.src = '/assets/sect-character-atlas.png';
+    this.walkSprite = new Image(); this.walkSprite.src = '/assets/sect-character-walk-atlas-v3.png';
+    this.walkUpSprite = new Image(); this.walkUpSprite.src = '/assets/sect-character-walk-up-v3.png';
+    this.walkDownSprite = new Image(); this.walkDownSprite.src = '/assets/sect-character-walk-down-v3.png';
     this.monsterSprite = new Image(); this.monsterSprite.src = '/assets/xianxia-monsters-atlas-v2-packed.png';
+    this.monsterWalkSprite = new Image(); this.monsterWalkSprite.src = '/assets/xianxia-monsters-walk-atlas-v3.png';
+    this.monsterWalkUpSprite = new Image(); this.monsterWalkUpSprite.src = '/assets/xianxia-monsters-walk-up-v3.png';
+    this.monsterWalkDownSprite = new Image(); this.monsterWalkDownSprite.src = '/assets/xianxia-monsters-walk-down-v3.png';
+    this.floorTextures=Object.fromEntries(Object.entries({sect_hall:'sect-hall-floor-v3.png',luoyang:'luoyang-floor-v3.png',spirit_mine:'spirit-mine-floor-v3.png',heaven_sect:'heaven-sect-floor-v3.png'}).map(([region,file])=>{const image=new Image();image.src=`/assets/${file}`;return [region,image];}));
     this.cleanup = [];
     this.ui = this.collectUI();
     this.sceneManager={load:scene=>{if(scene==='MainMenu'){this.destroy();this.onExit?.();}},respawnAtHall:()=>this.respawnAtHall()};
@@ -315,10 +323,20 @@ export class CultivationGame {
       if(enemy.animator.state!==state||enemy.animator.finished&&state!=='death')enemy.animator.play(state,{},state==='hurt'||state==='attack');
       enemy.animator.update(dt);
       enemy.hurt=Math.max(0,(enemy.hurt??0)-dt);
-      const smooth=1-Math.exp(-14*dt);
+      const smooth=1-Math.exp(-11*dt);
       enemy.position.x=lerp(enemy.position.x,enemy.target?.x??enemy.position.x,smooth);
       enemy.position.y=lerp(enemy.position.y,enemy.target?.y??enemy.position.y,smooth);
       enemy.position.z=lerp(enemy.position.z,enemy.target?.z??enemy.position.z,smooth);
+    }
+    // Network snapshots arrive at 20 Hz, while rendering normally runs at
+    // 60+ FPS. Interpolate remote players on every rendered frame instead of
+    // displaying the raw snapshot position in visible 50 ms steps.
+    const remoteSmooth=1-Math.exp(-12*dt);
+    for(const remote of this.remotePlayers.values()){
+      remote.position??=pos(remote.target);
+      remote.position.x=lerp(remote.position.x,remote.target?.x??remote.position.x,remoteSmooth);
+      remote.position.y=lerp(remote.position.y,remote.target?.y??remote.position.y,remoteSmooth);
+      remote.position.z=lerp(remote.position.z,remote.target?.z??remote.position.z,remoteSmooth);
     }
     const cameraT = 1 - Math.exp(-PLAYER_MOTION.cameraSharpness * dt);
     this.camera.x = lerp(this.camera.x, this.player.position.x, cameraT); this.camera.z = lerp(this.camera.z, this.player.position.z, cameraT);
@@ -332,7 +350,15 @@ export class CultivationGame {
 
   snapshot(data = {}) {
     const ownId = this.socket?.id;
-    for (const player of data.players ?? []) { if (player.id === ownId) this.mergeSelf(player); else this.remotePlayers.set(player.id, { ...player, target: pos(player.position) }); }
+    const seenPlayers=new Set();
+    for (const player of data.players ?? []) {
+      if (player.id === ownId) { this.mergeSelf(player); continue; }
+      seenPlayers.add(player.id);
+      const target=pos(player.position),old=this.remotePlayers.get(player.id);
+      if(old){const displayPosition=old.position;Object.assign(old,player);old.position=displayPosition;old.target=target;}
+      else this.remotePlayers.set(player.id,{...player,position:{...target},target});
+    }
+    for(const id of this.remotePlayers.keys())if(!seenPlayers.has(id))this.remotePlayers.delete(id);
     const seen = new Set(); for (const enemy of data.enemies ?? []) { if(enemy.regionId&&enemy.regionId!==this.profile.currentRegion)continue;seen.add(enemy.id);const old=this.enemies.get(enemy.id),nextPosition=pos(enemy.position),displayPosition=old?.position??nextPosition,moveSpeed=old?Math.hypot(nextPosition.x-(old.target?.x??old.position.x),nextPosition.z-(old.target?.z??old.position.z)):0,animator=old?.animator??new AnimationController(MONSTER_ANIMATION_CLIPS);if(old?.alive===false&&enemy.alive!==false)animator.play('idle',{},true);const monster=old instanceof Monster?old:new Monster({...enemy,position:displayPosition,target:nextPosition},animator),hurt=old&&enemy.hp<old.hp ? .28 : Math.max(0,(old?.hurt??0)-.05);monster.sync({...enemy,position:displayPosition,target:nextPosition,moveSpeed,hurt},performance.now(),Date.now());monster.animator=animator;this.enemies.set(enemy.id,monster); }
     for (const id of this.enemies.keys()) if (!seen.has(id)) this.enemies.delete(id);
     if (this.ui.onlineCount) this.ui.onlineCount.textContent = String(data.players?.length ?? 1);
@@ -374,7 +400,14 @@ export class CultivationGame {
     this.player.hp=nextHp;if(nextHp<oldHp){if(this.state.blocking)this.blockImpact();else this.receivePlayerDamage(oldHp-nextHp,nextHp);}
     if(data.alive===false)this.handlePlayerDeath({cultivationSystem:data.cultivationSystem});
     if(data.alive===true&&this.player.isDead)this.finishRespawn(data);
-    if(data.position&&this.state.dashTime<=0){const p=pos(data.position);this.player.position.x=lerp(this.player.position.x,p.x,.18);this.player.position.y=lerp(this.player.position.y??0,p.y,.18);this.player.position.z=lerp(this.player.position.z,p.z,.18);}
+    if(data.position&&this.state.dashTime<=0){
+      const p=pos(data.position),dx=p.x-this.player.position.x,dy=p.y-(this.player.position.y??0),dz=p.z-this.player.position.z,error=Math.hypot(dx,dz);
+      // Normal snapshots are slightly behind local input because of latency.
+      // Pulling toward every one caused a constant back-and-forth vibration.
+      // Correct only meaningful divergence; large corrections remain quick.
+      const correction=error > 2 ? .45 : error > .75 ? .12 : 0;
+      if(correction){this.player.position.x=lerp(this.player.position.x,p.x,correction);this.player.position.y=lerp(this.player.position.y??0,p.y,correction);this.player.position.z=lerp(this.player.position.z,p.z,correction);}
+    }
   }
   worldEvent(event = {}) {
     if(event.type==='enemy:damaged'){const enemy=this.enemies.get(event.enemyId);if(enemy){enemy.hurt=.34;if(enemy.isBoss){this.bossEngaged=true;this.bossCombatUntil=performance.now()+4500;enemy.tookDamageRecently=true;setTimeout(()=>{enemy.tookDamageRecently=false;},4500);}this.damageNumbers.push({x:enemy.position.x,z:enemy.position.z,value:statValue(event.damage),life:.85,max:.85});}}
@@ -437,15 +470,27 @@ export class CultivationGame {
 
   createTerrainProps(){const props=[];let seed=9173;const random=()=>((seed=seed*16807%2147483647)-1)/2147483646;for(let i=0;i<75;i++){const x=random()*92-46,z=random()*92-46;if(Math.abs(x)<5)continue;props.push({x,z,type:i%7===0?'rock':i%5===0?'fence':'tree'});}return props;}
 
-  screen(world) { return { x: this.canvas.width / 2 + (world.x - this.camera.x) * 18, y: this.canvas.height / 2 + (world.z - this.camera.z) * 12-(Number(world.y)||0)*4 }; }
+  screen(world) { return { x: this.canvas.width / 2 - this.camera.x * 18 + world.x * 18, y: this.canvas.height / 2 - this.camera.z * 12 + world.z * 12-(Number(world.y)||0)*4 }; }
   pixelRect(x, y, w, h, color) { this.ctx.fillStyle = color; this.ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
 
   drawWorld() {
     const c = this.ctx, w = this.canvas.width, h = this.canvas.height, theme=this.regionTheme();
     c.fillStyle = theme.base; c.fillRect(0, 0, w, h);
-    const tile = 36, ox = ((-this.camera.x * 18) % tile + tile) % tile, oy = ((-this.camera.z * 12) % 24 + 24) % 24;
-    for (let y = oy - 24; y < h; y += 24) for (let x = ox - tile; x < w; x += tile) { c.fillStyle = ((x / tile + y / 24) & 1) ? theme.tileA : theme.tileB; c.fillRect(x, y, tile - 1, 23); c.fillStyle = theme.line; c.fillRect(x, y, tile - 1, 1);c.globalAlpha=.38;c.fillStyle=theme.accent;c.fillRect(x+7,y+7,13,1);c.globalAlpha=1; }
-    for(const prop of this.terrainProps){const p=this.screen(prop);if(p.x<-35||p.x>w+35||p.y<-60||p.y>h+35)continue;if(theme.prop==='crystal')this.drawCrystal(p.x,p.y,theme);else if(theme.prop==='cloud')this.drawCloudPine(p.x,p.y,theme);else if(prop.type==='tree')this.drawTree(p.x,p.y,theme);else if(prop.type==='rock')this.drawRock(p.x,p.y,theme);else this.drawFence(p.x,p.y,theme);}
+    const floorTexture=this.floorTextures[this.profile.currentRegion],texturedMap=floorTexture?.complete&&floorTexture.naturalWidth;
+    if(texturedMap){
+      // A broad, low-contrast authored texture replaces the dense procedural
+      // checker grid. It scrolls more slowly than gameplay coordinates, which
+      // keeps the background calm while the player moves.
+      // Floor and entities share the exact same camera transform, so neither
+      // can slide relative to the other. Smooth sampling handles sub-pixels.
+      const tileSize=1024,originX=w/2-this.camera.x*18,originY=h/2-this.camera.z*12,ox=((originX%tileSize)+tileSize)%tileSize,oy=((originY%tileSize)+tileSize)%tileSize;
+      c.save();c.imageSmoothingEnabled=true;c.globalAlpha=.78;for(let y=oy-tileSize;y<h;y+=tileSize)for(let x=ox-tileSize;x<w;x+=tileSize)c.drawImage(floorTexture,x,y,tileSize,tileSize);c.restore();
+      c.fillStyle=this.profile.currentRegion==='heaven_sect'?'rgba(12,20,28,.24)':'rgba(5,8,13,.14)';c.fillRect(0,0,w,h);
+    }else{
+      const tile = 36, ox = ((-this.camera.x * 18) % tile + tile) % tile, oy = ((-this.camera.z * 12) % 24 + 24) % 24;
+      for (let y = oy - 24; y < h; y += 24) for (let x = ox - tile; x < w; x += tile) { c.fillStyle = ((x / tile + y / 24) & 1) ? theme.tileA : theme.tileB; c.fillRect(x, y, tile - 1, 23); c.fillStyle = theme.line; c.fillRect(x, y, tile - 1, 1);c.globalAlpha=.38;c.fillStyle=theme.accent;c.fillRect(x+7,y+7,13,1);c.globalAlpha=1; }
+    }
+    if(!texturedMap)for(const prop of this.terrainProps){const p=this.screen(prop);if(p.x<-35||p.x>w+35||p.y<-60||p.y>h+35)continue;if(theme.prop==='crystal')this.drawCrystal(p.x,p.y,theme);else if(theme.prop==='cloud')this.drawCloudPine(p.x,p.y,theme);else if(prop.type==='tree')this.drawTree(p.x,p.y,theme);else if(prop.type==='rock')this.drawRock(p.x,p.y,theme);else this.drawFence(p.x,p.y,theme);}
     this.drawRegionLandmark(theme);
   }
   drawTree(x,y,theme){this.pixelRect(x-3,y-13,6,15,theme?.prop==='city'?'#7e3c20':'#694329');this.pixelRect(x-12,y-29,24,14,theme?.prop==='city'?'#8a3d27':'#173f2c');this.pixelRect(x-9,y-39,18,14,theme?.prop==='city'?'#b04c32':'#20563a');this.pixelRect(x-5,y-47,10,12,theme?.accent??'#2e7047');}
@@ -455,13 +500,21 @@ export class CultivationGame {
   drawCloudPine(x,y,theme){this.pixelRect(x-2,y-16,4,17,'#55463a');this.pixelRect(x-15,y-25,30,5,theme.accent);this.pixelRect(x-11,y-34,22,6,'#6f9fa8');this.ctx.save();this.ctx.globalAlpha=.18;this.ctx.fillStyle='#eafaff';this.ctx.beginPath();this.ctx.ellipse(x,y,24,8,0,0,Math.PI*2);this.ctx.fill();this.ctx.restore();}
   drawRegionLandmark(theme){const p=this.screen(this.currentRegion().townGate);if(p.x<-100||p.x>this.canvas.width+100||p.y<-100||p.y>this.canvas.height+100)return;this.pixelRect(p.x-35,p.y-10,70,10,theme.line);this.pixelRect(p.x-30,p.y-52,9,43,theme.accent);this.pixelRect(p.x+21,p.y-52,9,43,theme.accent);this.pixelRect(p.x-38,p.y-58,76,8,'#58231d');this.ctx.fillStyle='#fff0b0';this.ctx.font='bold 11px serif';this.ctx.textAlign='center';this.ctx.fillText(this.currentRegion().name,p.x,p.y-66);}
 
+  drawMovementBackdrop(p,entity,faction,size,moving){
+    // Intentionally empty: shadows and motion echoes made a single sprite
+    // look like multiple overlapping characters while moving.
+  }
+
   drawSprite(entity, faction, remote = false) {
     const p = this.screen(entity.position); const action = entity.action ?? 'idle'; const row={orthodox:0,demonic:1,heretic:2}[faction]??0;
-    const moving=Math.hypot(entity.velocity?.x??0,entity.velocity?.z??0)>.3;const frame=entity===this.player?this.animationController.frame:action==='slash'?2:(action==='cast'||action==='block')?3:moving?1:0;
-    if (this.sprite.complete && this.sprite.naturalWidth) {
-      const sw = this.sprite.naturalWidth / 4, sh = this.sprite.naturalHeight / 3, size = remote ? 64 : 72;
-      this.ctx.save();if(entity===this.player&&this.player.getFeedback().flashing)this.ctx.filter='brightness(1.4) sepia(1) saturate(9) hue-rotate(315deg)';if((entity.facing??4)>=5){this.ctx.translate(Math.round(p.x*2),0);this.ctx.scale(-1,1);}
-      this.ctx.drawImage(this.sprite, frame * sw, row * sh, sw, sh, Math.round(p.x - size / 2), Math.round(p.y - size * .78), size, size);
+    const vx=entity.velocity?.x??0,vz=entity.velocity?.z??0,moving=Math.hypot(vx,vz)>.3,localWalk=entity===this.player&&['walk','run'].includes(this.animationController.state),vertical=Math.abs(vz)>Math.abs(vx)*.72,directionalAtlas=vertical?(vz<0?this.walkUpSprite:this.walkDownSprite):this.walkSprite,useWalk=moving&&(remote||localWalk)&&directionalAtlas.complete&&directionalAtlas.naturalWidth;
+    const frame=useWalk?(entity===this.player?this.animationController.frame:Math.floor(performance.now()*(Math.hypot(entity.velocity?.x??0,entity.velocity?.z??0) > 5 ? .022 : .018)+(entity.id?.length??0))%MOVEMENT_FRAME_COUNT):entity===this.player?this.animationController.frame:action==='slash'?2:(action==='cast'||action==='block')?3:0;
+    const atlas=useWalk?directionalAtlas:this.sprite,columns=useWalk?MOVEMENT_FRAME_COUNT:4;
+    if (atlas.complete && atlas.naturalWidth) {
+      const sw = atlas.naturalWidth / columns, sh = atlas.naturalHeight / 3, size = remote ? 64 : 72;
+      this.drawMovementBackdrop(p,entity,faction,size,moving);
+      this.ctx.save();if(entity===this.player&&this.player.getFeedback().flashing)this.ctx.filter='brightness(1.4) sepia(1) saturate(9) hue-rotate(315deg)';if(!vertical&&(entity.facing??4)>=5){this.ctx.translate(p.x*2,0);this.ctx.scale(-1,1);}
+      this.ctx.drawImage(atlas, frame * sw, row * sh, sw, sh, p.x-size/2, p.y-size*.78, size, size);
       this.ctx.restore();
     } else this.drawCultivatorFallback(p.x, p.y, faction, entity.facing ?? 4);
   }
@@ -470,7 +523,7 @@ export class CultivationGame {
   drawEnemy(enemy) {
     if ((enemy.alive === false || enemy.hp <= 0) && enemy.animator?.finished) return; const p = this.screen(enemy.position); const imp = enemy.type === 'flame_imp', trash = imp || enemy.type === 'spirit_fox';
     if(enemy.id===this.lockedTargetId&&enemy.alive!==false){this.ctx.save();this.ctx.strokeStyle='#ffe27a';this.ctx.lineWidth=2;this.ctx.beginPath();this.ctx.ellipse(p.x,p.y-3,18,8,0,0,Math.PI*2);this.ctx.stroke();this.ctx.restore();}
-    if(this.monsterSprite.complete&&this.monsterSprite.naturalWidth&&enemy.animator){const fallbackRow=enemy.isBoss||enemy.type==='rogue_cultivator'?2:imp?1:0,row=Number.isInteger(enemy.spriteVariant)?enemy.spriteVariant:fallbackRow,frame=enemy.attackFrame?.(performance.now())??enemy.animator.frame,sw=this.monsterSprite.naturalWidth/22,sh=this.monsterSprite.naturalHeight/3,size=enemy.isBoss?126:enemy.type==='rogue_cultivator'?96:82,wave=Math.max(1,Number(enemy.wave)||1),hue=(wave-1)*47%360;this.ctx.save();if(enemy.hurt>0)this.ctx.filter='brightness(1.5) sepia(1) saturate(8) hue-rotate(315deg)';else if(wave>1)this.ctx.filter=`hue-rotate(${hue}deg) saturate(${1+Math.min(.75,wave*.06)}) brightness(${1+Math.min(.18,wave*.015)})`;this.ctx.drawImage(this.monsterSprite,frame*sw,row*sh,sw,sh,Math.round(p.x-size/2),Math.round(p.y-size*.9),size,size);this.ctx.restore();if(enemy.alive!==false){const ratio=clamp(enemy.hp/Math.max(1,enemy.maxHp),0,1),barY=p.y-(enemy.isBoss?58:38);this.pixelRect(p.x-18,barY,36,3,'#180b12');this.pixelRect(p.x-18,barY,36*ratio,3,wave>=8?'#c45cff':wave>=4?'#ff8b3d':'#ef4b5c');this.ctx.fillStyle='#ffe7a0';this.ctx.font='bold 7px monospace';this.ctx.textAlign='center';this.ctx.fillText(`Lv.${enemy.level??wave} · Vòng ${wave}`,Math.round(p.x),Math.round(barY-3));}return;}
+    if(this.monsterSprite.complete&&this.monsterSprite.naturalWidth&&enemy.animator){const fallbackRow=enemy.isBoss||enemy.type==='rogue_cultivator'?2:imp?1:0,row=Number.isInteger(enemy.spriteVariant)?enemy.spriteVariant:fallbackRow,dx=(enemy.target?.x??enemy.position.x)-enemy.position.x,dz=(enemy.target?.z??enemy.position.z)-enemy.position.z,vertical=Math.abs(dz)>Math.abs(dx)*.72,directionalAtlas=vertical?(dz<0?this.monsterWalkUpSprite:this.monsterWalkDownSprite):this.monsterWalkSprite,useWalk=enemy.animator.state==='walk'&&directionalAtlas.complete&&directionalAtlas.naturalWidth,atlas=useWalk?directionalAtlas:this.monsterSprite,columns=useWalk?MOVEMENT_FRAME_COUNT:22,frame=useWalk?Math.floor(performance.now()*.018+(enemy.id?.length??0))%MOVEMENT_FRAME_COUNT:enemy.attackFrame?.(performance.now())??enemy.animator.frame,sw=atlas.naturalWidth/columns,sh=atlas.naturalHeight/3,size=enemy.isBoss?126:enemy.type==='rogue_cultivator'?96:82,wave=Math.max(1,Number(enemy.wave)||1),hue=(wave-1)*47%360;this.ctx.save();if(enemy.hurt>0)this.ctx.filter='brightness(1.5) sepia(1) saturate(8) hue-rotate(315deg)';else if(wave>1)this.ctx.filter=`hue-rotate(${hue}deg) saturate(${1+Math.min(.75,wave*.06)}) brightness(${1+Math.min(.18,wave*.015)})`;if(useWalk&&!vertical&&dx<0){this.ctx.translate(p.x*2,0);this.ctx.scale(-1,1);}this.ctx.drawImage(atlas,frame*sw,row*sh,sw,sh,p.x-size/2,p.y-size*.9,size,size);this.ctx.restore();if(enemy.alive!==false){const ratio=clamp(enemy.hp/Math.max(1,enemy.maxHp),0,1),barY=p.y-(enemy.isBoss?58:38);this.pixelRect(p.x-18,barY,36,3,'#180b12');this.pixelRect(p.x-18,barY,36*ratio,3,wave>=8?'#c45cff':wave>=4?'#ff8b3d':'#ef4b5c');this.ctx.fillStyle='#ffe7a0';this.ctx.font='bold 7px monospace';this.ctx.textAlign='center';this.ctx.fillText(`Lv.${enemy.level??wave} · Vòng ${wave}`,Math.round(p.x),Math.round(barY-3));}return;}
     this.ctx.save(); if (enemy.hurt > 0) { this.ctx.globalAlpha = .55 + Math.sin(performance.now() * .05) * .35; this.ctx.translate(Math.sin(performance.now() * .08) * 2, 0); }
     if (imp) { this.pixelRect(p.x - 6,p.y - 13,12,12,'#25162c'); this.pixelRect(p.x - 4,p.y - 19,8,8,'#dc3564'); this.pixelRect(p.x - 2,p.y - 12,2,2,'#ffd56b'); }
     else if (enemy.isBoss) { this.pixelRect(p.x-16,p.y-37,32,35,'#352839'); this.pixelRect(p.x-12,p.y-45,24,12,'#9a3046'); this.pixelRect(p.x-24,p.y-29,48,8,'#bf8b3a'); }
@@ -483,7 +536,7 @@ export class CultivationGame {
   render() {
     const feedback=this.player.getFeedback(),shake=feedback.shakeStrength;this.ctx.save();if(shake>0){const now=performance.now();this.ctx.translate(Math.round(Math.sin(now*.19)*3*shake),Math.round(Math.cos(now*.23)*2*shake));}
     this.drawWorld();this.goldDropSystem?.render(this.ctx);for(const enemy of this.enemies.values())enemy.renderAttackVFX?.(this.ctx,world=>this.screen(world),performance.now());this.vfxManager?.render(this.ctx); const drawables = [...this.enemies.values()].map(e => ({ z:e.position.z, fn:()=>this.drawEnemy(e) }));
-    for (const remote of this.remotePlayers.values()) drawables.push({ z:remote.target.z, fn:()=>this.drawSprite({ ...remote, position:remote.target }, remote.faction, true) });
+    for (const remote of this.remotePlayers.values()) drawables.push({ z:remote.position.z, fn:()=>this.drawSprite(remote, remote.faction, true) });
     drawables.push({ z:this.player.position.z, fn:()=>this.drawSprite(this.player, this.profile.faction) }); drawables.sort((a,b)=>a.z-b.z).forEach(d=>d.fn());if(this.state.blocking)this.drawBarrier(); this.drawEffects();this.drawMinimap();
     this.ctx.fillStyle='rgba(8,12,18,.15)'; for(let y=0;y<this.canvas.height;y+=2)this.ctx.fillRect(0,y,this.canvas.width,1);
     this.ctx.restore();
@@ -510,6 +563,6 @@ export class CultivationGame {
   renderSkillTree(){return this.skillTreePanel.render();}
   toast(message,tone='info'){if(!message||!this.ui.toastStack)return;const el=document.createElement('div');el.className=`toast toast--${tone} is-visible`;el.setAttribute('role',tone==='error'?'alert':'status');el.textContent=message;this.ui.toastStack.appendChild(el);setTimeout(()=>el.remove(),2600);}
   resize(){const scale=Math.max(2,Math.floor(Math.min(innerWidth/480,innerHeight/270)));this.canvas.width=Math.max(320,Math.floor(innerWidth/scale));this.canvas.height=Math.max(180,Math.floor(innerHeight/scale));this.ctx.imageSmoothingEnabled=false;}
-  loop(time){if(!this.state.running)return;this.frameRequest=requestAnimationFrame(this.bound.loop);const elapsed=Math.max(0,(time-this.lastFrame)/1000);this.lastFrame=time;const dt=Math.min(.05,elapsed);try{if(!this.state.paused&&!this.player.getFeedback(time).hitStopped)this.update(dt);this.render();this.updateUI();}catch(error){console.error('Game frame recovered after an error:',error);}}
+  loop(time){if(!this.state.running)return;this.frameRequest=requestAnimationFrame(this.bound.loop);const elapsed=Math.max(0,(time-this.lastFrame)/1000);this.lastFrame=time;const dt=Math.min(.05,elapsed);try{if(!this.state.paused&&!this.player.getFeedback(time).hitStopped)this.update(dt);this.render();if(time-this.lastUiFrame>=50){this.updateUI();this.lastUiFrame=time;}}catch(error){console.error('Game frame recovered after an error:',error);}}
   destroy(){if(this.destroyed)return;this.destroyed=true;this.state.running=false;this.keys.clear();if(this.frameRequest)cancelAnimationFrame(this.frameRequest);this.mapManager?.destroy();this.goldDropSystem?.clear();this.vfxManager?.clear();this.uiManager?.destroy();this.skillTreePanel?.destroy();this.tribulationScreen?.destroy();this.cleanup.splice(0).forEach(remove=>remove());for(const overlay of [this.shopUI,this.inventoryUI,this.touchControls])overlay?.remove();this.socket?.disconnect();}
 }
