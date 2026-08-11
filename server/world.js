@@ -210,14 +210,18 @@ function equipmentStats(equipment = {}, faction = "orthodox") {
 
 export function playerGrowthForLevel(level = 1) {
   const safeLevel = clamp(Math.floor(finiteNumber(level, 1)), 1, 16);
+  const attackMultiplier = Math.round((1 + (safeLevel - 1) * .05) * 1000) / 1000;
   return Object.freeze({
     level: safeLevel,
     maxHp: 120 + (safeLevel - 1) * 8,
     maxMp: 100 + (safeLevel - 1) * 5,
-    attackMultiplier: Math.round((1 + (safeLevel - 1) * .05) * 1000) / 1000,
+    baseAttack: round(ABILITIES.basic.damage * attackMultiplier, 2),
+    attackMultiplier,
     cultivationMultiplier: Math.round((1 + (safeLevel - 1) * .025) * 1000) / 1000,
   });
 }
+
+const effectiveBasicDamage = (attackPower, faction) => round(attackPower * (faction === "orthodox" ? 1.38 : faction === "heretic" ? 1.12 : 1), 2);
 
 function refreshEquipmentStats(player) {
   const previousMaxHp = player.maxHp;
@@ -226,6 +230,9 @@ function refreshEquipmentStats(player) {
   const growth = playerGrowthForLevel(player.cultivationSystem.level);
   player.maxHp = growth.maxHp;
   player.maxMp = growth.maxMp + stats.maxMana;
+  player.baseAtk = growth.baseAttack;
+  player.totalAtk = round(growth.baseAttack + stats.attack, 2);
+  player.basicDamage = effectiveBasicDamage(player.totalAtk,player.faction);
   player.hp = clamp(player.hp + Math.max(0, player.maxHp - previousMaxHp), 0, player.maxHp);
   player.mp = clamp(player.mp + Math.max(0, player.maxMp - previousMaxMp), 0, player.maxMp);
   return stats;
@@ -593,6 +600,9 @@ function createPlayer(id, identity, spawn, now) {
     maxHp,
     mp: clamp(session.mp, 0, maxMp),
     maxMp,
+    baseAtk: growth.baseAttack,
+    totalAtk: round(growth.baseAttack + gearStats.attack,2),
+    basicDamage: effectiveBasicDamage(growth.baseAttack + gearStats.attack,faction),
     // Legacy qi fields mirror the active EXP system. They are no longer a
     // second capped progression track.
     qi: cultivationSystem.currentExp,
@@ -710,7 +720,6 @@ function serializeBreakthrough(breakthrough) {
 
 function serializePublicPlayer(player, now) {
   const cultivation = player.cultivationSystem.serialize();
-  const gear = equipmentStats(player.equipment,player.faction);
   const growth = playerGrowthForLevel(player.cultivationSystem.level);
   return {
     id: player.id,
@@ -725,12 +734,13 @@ function serializePublicPlayer(player, now) {
     },
     yaw: round(player.yaw, 3),
     sequence: player.sequence,
-    hp: Math.ceil(player.hp),
+    hp: round(player.hp,2),
     maxHp: player.maxHp,
-    mp: Math.floor(player.mp),
+    mp: round(player.mp,2),
     maxMp: player.maxMp,
-    baseAtk: round(ABILITIES.basic.damage * growth.attackMultiplier, 2),
-    totalAtk: round(ABILITIES.basic.damage * growth.attackMultiplier + gear.attack, 2),
+    baseAtk: player.baseAtk,
+    totalAtk: player.totalAtk,
+    basicDamage: player.basicDamage,
     cultivationMultiplier: growth.cultivationMultiplier,
     qi: cultivation.currentExp,
     gold: Math.floor(player.gold),
@@ -775,7 +785,7 @@ function serializeEnemy(enemy) {
       z: round(enemy.position.z),
     },
     yaw: round(enemy.yaw, 3),
-    hp: Math.ceil(enemy.hp),
+    hp: round(enemy.hp,2),
     maxHp: enemy.maxHp,
     alive: enemy.alive,
     respawnAt: enemy.respawnAt || null,
@@ -986,12 +996,10 @@ export class GameRoom {
     const weaponId = typeof player.equipment.weapon === "string" && player.equipment.weapon in WEAPON_ATTACK_BONUSES
       ? player.equipment.weapon
       : null;
-    const weaponBonus = weaponId ? WEAPON_ATTACK_BONUSES[weaponId] : 0;
     const equipmentAttack = Math.max(0, gear.attack);
-    const levelDamage = key === "basic"
-      ? finiteNumber(ability.damage) * playerGrowthForLevel(player.cultivationSystem.level).attackMultiplier
-      : finiteNumber(ability.damage);
-    const attackDamage = Math.max(0, levelDamage + equipmentAttack);
+    const attackDamage = key === "basic"
+      ? player.totalAtk
+      : Math.max(0, finiteNumber(ability.damage) + equipmentAttack);
     const combatAbility = { ...ability, damage: attackDamage };
     if (player.faction === "orthodox") combatAbility.range = ability.range * 1.25;
     if (player.faction === "demonic" && ability.targetMode === "area") combatAbility.radius = ability.radius * 1.35;
@@ -1035,6 +1043,7 @@ export class GameRoom {
       faction: player.faction,
       weaponId,
       totalAtk: attackDamage,
+      basicDamage: key === "basic" ? effectiveBasicDamage(attackDamage,player.faction) : undefined,
     }, now);
     return { ability: key, skillId: skill?.id ?? "basic", hitIds, player: serializePublicPlayer(player, now) };
   }
@@ -1189,7 +1198,7 @@ export class GameRoom {
       enemyId: enemy.id,
       playerId: player.id,
       damage: round(damage),
-      hp: Math.ceil(enemy.hp),
+      hp: round(enemy.hp,2),
     }, now);
     if (enemy.hp <= 0) this.defeatEnemy(enemy, player, now);
     return damage;
@@ -1668,7 +1677,7 @@ export class GameRoom {
       playerId: player.id,
       source,
       damage: round(damage),
-      hp: Math.ceil(player.hp),
+      hp: round(player.hp,2),
     }, now);
     if (player.hp <= 0) {
       player.alive = false;

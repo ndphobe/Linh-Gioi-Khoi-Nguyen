@@ -18,6 +18,7 @@ test("every cultivation level raises core stats and authoritative basic damage",
   const first=playerGrowthForLevel(1),sixth=playerGrowthForLevel(6);
   assert.ok(sixth.maxHp>first.maxHp);
   assert.ok(sixth.maxMp>first.maxMp);
+  assert.ok(sixth.baseAttack>first.baseAttack);
   assert.ok(sixth.attackMultiplier>first.attackMultiplier);
   assert.ok(sixth.cultivationMultiplier>first.cultivationMultiplier);
 
@@ -25,13 +26,31 @@ test("every cultivation level raises core stats and authoritative basic damage",
     const room=new GameRoom(`LEVEL-DAMAGE-${level}`);
     const player=room.addPlayer(`p-${level}`,{faction:'heretic',session:{cultivationSystem:{level,currentExp:0}}},1_000);
     const enemy=room.enemies.get('fox-1');enemy.maxHp=1_000;enemy.hp=1_000;player.position={x:-6,y:0,z:14};
-    room.castAbility(player.id,{ability:'basic',aim:{x:0,z:-1},targetId:enemy.id},2_000);
-    return {damage:1_000-enemy.hp,player};
+    const result=room.castAbility(player.id,{ability:'basic',aim:{x:0,z:-1},targetId:enemy.id},2_000);
+    return {damage:1_000-enemy.hp,player,snapshot:result.player};
   };
   const low=strikeAt(1),high=strikeAt(6);
   assert.ok(high.damage>low.damage);
   assert.equal(high.player.maxHp,sixth.maxHp);
   assert.equal(high.player.maxMp,sixth.maxMp);
+  assert.equal(high.snapshot.baseAtk,sixth.baseAttack);
+  assert.equal(high.snapshot.totalAtk,sixth.baseAttack);
+  assert.equal(high.snapshot.basicDamage,Math.round(high.damage*100)/100);
+});
+
+test("level-up snapshots keep current and maximum HP, MP, attack and combat damage synchronized",()=>{
+  const room=new GameRoom('PLAYER-STAT-SYNC');
+  const player=room.addPlayer('p1',{faction:'heretic',session:{cultivationSystem:{level:1,currentExp:0}}},1_000);
+  player.hp=70;player.mp=40;
+  player.cultivationSystem.sync({level:2,currentExp:0});room.syncCultivationFields(player);
+  const growth=playerGrowthForLevel(2),snapshot=room.privatePlayerSnapshot(player.id,1_100);
+  assert.equal(snapshot.maxHp,growth.maxHp);
+  assert.equal(snapshot.maxMp,growth.maxMp);
+  assert.equal(snapshot.hp,78);
+  assert.equal(snapshot.mp,45);
+  assert.equal(snapshot.baseAtk,growth.baseAttack);
+  assert.equal(snapshot.totalAtk,growth.baseAttack);
+  assert.equal(snapshot.basicDamage,Math.round(growth.baseAttack*1.12*100)/100);
 });
 
 test("monster balance applies requested nerfs and trash mobs die in 2-3 basic hits", () => {
