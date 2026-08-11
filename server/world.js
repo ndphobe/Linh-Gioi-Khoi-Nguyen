@@ -233,6 +233,10 @@ function refreshEquipmentStats(player) {
   player.baseAtk = growth.baseAttack;
   player.totalAtk = round(growth.baseAttack + stats.attack, 2);
   player.basicDamage = effectiveBasicDamage(player.totalAtk,player.faction);
+  player.defense = round(stats.defense,2);
+  player.attackSpeed = round(Math.min(.35,stats.attackSpeed),4);
+  player.critRate = round(Math.min(.75,stats.critRate),4);
+  player.lifeSteal = round(Math.min(.6,stats.lifeSteal+(player.faction==="demonic"?.14:0)),4);
   player.hp = clamp(player.hp + Math.max(0, player.maxHp - previousMaxHp), 0, player.maxHp);
   player.mp = clamp(player.mp + Math.max(0, player.maxMp - previousMaxMp), 0, player.maxMp);
   return stats;
@@ -603,6 +607,10 @@ function createPlayer(id, identity, spawn, now) {
     baseAtk: growth.baseAttack,
     totalAtk: round(growth.baseAttack + gearStats.attack,2),
     basicDamage: effectiveBasicDamage(growth.baseAttack + gearStats.attack,faction),
+    defense: round(gearStats.defense,2),
+    attackSpeed: round(Math.min(.35,gearStats.attackSpeed),4),
+    critRate: round(Math.min(.75,gearStats.critRate),4),
+    lifeSteal: round(Math.min(.6,gearStats.lifeSteal+(faction==="demonic"?.14:0)),4),
     // Legacy qi fields mirror the active EXP system. They are no longer a
     // second capped progression track.
     qi: cultivationSystem.currentExp,
@@ -741,6 +749,10 @@ function serializePublicPlayer(player, now) {
     baseAtk: player.baseAtk,
     totalAtk: player.totalAtk,
     basicDamage: player.basicDamage,
+    defense: player.defense,
+    attackSpeed: player.attackSpeed,
+    critRate: player.critRate,
+    lifeSteal: player.lifeSteal,
     cultivationMultiplier: growth.cultivationMultiplier,
     qi: cultivation.currentExp,
     gold: Math.floor(player.gold),
@@ -972,12 +984,11 @@ export class GameRoom {
         slowMs: Math.max(Number(skill.control) || 0, 0) * 1_000,
         controlMs: Math.max(Number(skill.control) || 0, 0) * 1_000,
         dotDamage: Math.max(Number(skill.dot) || 0, 0),
-        lifeSteal: Math.max(Number(skill.lifeSteal) || 0, 0),
       };
     }
 
     const gear = equipmentStats(player.equipment,player.faction);
-    ability = { ...ability, cooldownMs: Math.round(ability.cooldownMs * (1 - Math.min(.35, gear.attackSpeed))) };
+    ability = { ...ability, cooldownMs: Math.round(ability.cooldownMs * (1 - player.attackSpeed)) };
 
     const readyAt = player.cooldowns[key] ?? 0;
     if (readyAt > now) throw gameError("ON_COOLDOWN", `${ability.label} chưa hồi chiêu.`);
@@ -1020,15 +1031,14 @@ export class GameRoom {
     } else {
       const targets = this.selectAbilityTargets(player, combatAbility, aim, payload.targetId);
       for (const enemy of targets) {
-        const critical = gear.critRate > 0 && this.random() < Math.min(.75,gear.critRate);
+        const critical = player.critRate > 0 && this.random() < player.critRate;
         const resolvedDamage = attackDamage * (critical ? 1.6 : 1);
         let dealt = 0;
         if (player.faction === "orthodox" && (key === "basic" || ["sword_intent", "myriad_swords"].includes(skill?.id))) {
           for (let strike = 0; strike < 3; strike += 1) dealt += this.damageEnemy(enemy, resolvedDamage * 0.46, player, now + strike * 35, combatAbility);
         } else dealt = this.damageEnemy(enemy, player.faction === "heretic" ? resolvedDamage * 1.12 : resolvedDamage, player, now, combatAbility);
         if (combatAbility.dotDamage > 0 && enemy.alive) this.applyDamageOverTime(enemy,player,combatAbility.dotDamage,now);
-        const lifeSteal = Math.min(.6,gear.lifeSteal + combatAbility.lifeSteal + (player.faction === "demonic" ? .14 : 0));
-        if (lifeSteal > 0) player.hp = Math.min(player.maxHp,player.hp+dealt*lifeSteal);
+        if (key === "basic" && player.lifeSteal > 0) player.hp = Math.min(player.maxHp,player.hp+dealt*player.lifeSteal);
         hitIds.push(enemy.id);
       }
     }
@@ -1646,7 +1656,7 @@ export class GameRoom {
       return 0;
     }
     let damage = clamp(finiteNumber(rawDamage), 0, 10_000);
-    const defense = equipmentStats(player.equipment,player.faction).defense;
+    const defense = player.defense;
     if (defense > 0) damage *= 100 / (100 + defense);
     if (player.blocking) {
       const perfectParry = source?.kind !== "lightning" && now <= player.parryUntil;

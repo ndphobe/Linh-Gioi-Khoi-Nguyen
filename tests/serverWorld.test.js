@@ -348,6 +348,37 @@ test("server skill state owns assignment, mana, cooldown and tier damage",()=>{
   assert.throws(()=>room.castAbility(player.id,{ability:'q',skillId:'forged-skill',aim:{x:0,z:-1}},7_000),error=>error.code==='SKILL_MISMATCH');
 });
 
+test("basic attacks use the authoritative life-steal rate while skills never life-steal",()=>{
+  const room=new GameRoom('BASIC-LIFE-STEAL',{random:()=>.99});
+  const player=room.addPlayer('p1',{faction:'demonic',session:{
+    gold:10_000,
+    inventory:['demonic_soul_saber','demonic_blood_armor'],
+    equipment:{weapon:'demonic_soul_saber',armor:'demonic_blood_armor'},
+    cultivationSystem:{level:4,currentExp:0},
+  }},1_000);
+  const snapshot=room.privatePlayerSnapshot(player.id,1_100);
+  assert.equal(snapshot.defense,27);
+  assert.equal(snapshot.attackSpeed,.09);
+  assert.equal(snapshot.critRate,.05);
+  assert.equal(snapshot.lifeSteal,.24);
+
+  player.position={x:-6,y:0,z:14};
+  player.hp=50;
+  const enemy=room.enemies.get('fox-1');
+  enemy.maxHp=1_000;enemy.hp=1_000;
+  const hpBeforeBasic=player.hp,enemyBeforeBasic=enemy.hp;
+  room.castAbility(player.id,{ability:'basic',aim:{x:0,z:-1},targetId:enemy.id},2_000);
+  const basicDamage=enemyBeforeBasic-enemy.hp;
+  assert.ok(Math.abs(player.hp-(hpBeforeBasic+basicDamage*snapshot.lifeSteal))<1e-9);
+
+  room.updateSkill(player.id,{action:'unlock',skillId:'blood_reaver'},2_100);
+  room.updateSkill(player.id,{action:'assign',skillId:'blood_reaver',slot:'e'},2_200);
+  player.hp=50;enemy.hp=1_000;enemy.alive=true;
+  room.castAbility(player.id,{ability:'e',skillId:'blood_reaver',aim:{x:0,z:-1},targetId:enemy.id},3_000);
+  assert.ok(enemy.hp<1_000);
+  assert.equal(player.hp,50);
+});
+
 test("skill unlocks enforce real level and gold on the server",()=>{
   const lowRoom=new GameRoom('SKILL-LEVEL');
   const low=lowRoom.addPlayer('low',{faction:'orthodox',session:{gold:999,cultivationSystem:{level:1,currentExp:0}}},1_000);
