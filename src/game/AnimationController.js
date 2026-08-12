@@ -2,8 +2,8 @@ export const PLAYER_ANIMATION_CLIPS = Object.freeze({
   idle: Object.freeze({ frames: [0], fps: 6, loop: true }),
   // Movement uses the dedicated eight-column walk atlas. Combat states still
   // use the original four-column atlas and its authored impact poses.
-  walk: Object.freeze({ frames: [0,1,2,3,4,5,6,7], fps: 18, loop: true }),
-  run: Object.freeze({ frames: [0,1,2,3,4,5,6,7], fps: 22, loop: true }),
+  walk: Object.freeze({ frames: [0,1,2,3,4,5,6,7], fps: 10, loop: true }),
+  run: Object.freeze({ frames: [0,1,2,3,4,5,6,7], fps: 14, loop: true }),
   attack: Object.freeze({ frames: [0, 2, 2, 0], fps: 14, loop: false, markerFrame: 1 }),
   cast: Object.freeze({ frames: [0, 3, 3, 0], fps: 10, loop: false, markerFrame: 2 }),
   block: Object.freeze({ frames: [3], fps: 6, loop: true }),
@@ -18,10 +18,19 @@ export const MONSTER_ANIMATION_CLIPS = Object.freeze({
   // movement poses keeps the monster visible throughout its wind-up and hit.
   attack: Object.freeze({ frames: [7, 8, 9, 10, 9], fps: 12, loop: false, markerFrame: 2 }),
   hurt: Object.freeze({ frames: [2, 3, 2], fps: 14, loop: false }),
-  death: Object.freeze({ start: 16, count: 6, fps: 9, loop: false }),
+  // Keep a complete silhouette while fading out. Atlas frames 16-21 are
+  // isolated dissolve fragments and look like accidentally cropped sprites.
+  death: Object.freeze({ frames: [0, 0, 0, 0, 0, 0], fps: 9, loop: false }),
 });
 
 const framesFor = clip => clip.frames ?? Array.from({ length: clip.count }, (_, index) => clip.start + index);
+
+export const loopFrameForDistance = (distancePixels, cyclePixels, frameCount = 8) => {
+  const distance = Math.max(0, Number(distancePixels) || 0);
+  const cycle = Math.max(1, Number(cyclePixels) || 1);
+  const count = Math.max(1, Math.floor(Number(frameCount) || 1));
+  return Math.floor((distance % cycle) / cycle * count) % count;
+};
 
 export class AnimationController {
   constructor(clips = PLAYER_ANIMATION_CLIPS, initialState = 'idle') {
@@ -65,6 +74,16 @@ export class AnimationController {
     if (this.markerFired) return;
     this.markerFired = true;
     this.callbacks?.onMarker?.({ state: this.state, frame: this.frame });
+  }
+
+  seekLoop(cycles) {
+    if (!this.clip.loop) return this.frame;
+    const frames = framesFor(this.clip);
+    const phase = ((Number(cycles) || 0) % 1 + 1) % 1;
+    this.frameCursor = Math.floor(phase * frames.length) % frames.length;
+    this.frameTime = 0;
+    this.finished = false;
+    return this.frame;
   }
 
   update(deltaSeconds) {

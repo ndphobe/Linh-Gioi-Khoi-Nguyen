@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { AnimationController, PLAYER_ANIMATION_CLIPS } from '../src/game/AnimationController.js';
+import { AnimationController, loopFrameForDistance, PLAYER_ANIMATION_CLIPS } from '../src/game/AnimationController.js';
 import { Character } from '../src/game/Character.js';
 import { CultivationSystem, REALM_HIERARCHY, requiredEXP } from '../src/game/CultivationSystem.js';
 import { ItemSystem } from '../src/game/ItemSystem.js';
@@ -65,6 +65,16 @@ test('animation markers fire once on the authored attack keyframe',()=>{
   assert.equal(markers,1);
   assert.equal(completed,1);
   assert.equal(animation.finished,true);
+});
+
+test('locomotion animation phase is locked to travelled distance',()=>{
+  const animation=new AnimationController(PLAYER_ANIMATION_CLIPS);
+  animation.play('walk',{},true);
+  assert.equal(animation.seekLoop(.25),2);
+  assert.equal(animation.seekLoop(.5),4);
+  assert.equal(animation.seekLoop(1.25),2);
+  assert.equal(loopFrameForDistance(29,58),4);
+  assert.equal(loopFrameForDistance(87,58),4);
 });
 
 test('player damage arms red flash, hit-stop and screen shake timers',()=>{

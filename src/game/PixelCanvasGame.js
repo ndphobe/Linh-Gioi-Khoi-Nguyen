@@ -12,7 +12,7 @@ import { getSectCombatData } from './SectData.js';
 import { Player } from './Player.js';
 import { CultivationSystem, tribulationGateForLevel } from './CultivationSystem.js';
 import { ItemSystem } from './ItemSystem.js';
-import { AnimationController, MONSTER_ANIMATION_CLIPS, PLAYER_ANIMATION_CLIPS } from './AnimationController.js';
+import { AnimationController, loopFrameForDistance, MONSTER_ANIMATION_CLIPS, PLAYER_ANIMATION_CLIPS } from './AnimationController.js';
 import { CombatSystem } from './CombatSystem.js';
 import { UIManager } from './UIManager.js';
 import { Monster, monsterAttackFor } from './Monster.js';
@@ -20,9 +20,9 @@ import { SkillTreePanel } from './UI/SkillTreePanel.js';
 import { TribulationScreen } from './TribulationScreen.js';
 
 export const PLAYER_MOTION = Object.freeze({
-  walkSpeed: 6.2, acceleration: 18, deceleration: 23,
+  walkSpeed: 4.7, acceleration: 13, deceleration: 17,
   dashDistance: 4.4, dashDuration: .18, dashCooldown: 1.2, dashIFrames: .32,
-  cameraSharpness: 6.5,
+  walkCyclePixels: 58,
 });
 
 const COLORS = Object.freeze({
@@ -33,6 +33,9 @@ const COLORS = Object.freeze({
 const KEYS_TO_SLOT = { KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f', KeyG: 'g' };
 const TRIBULATION_WAVES = 10;
 const MOVEMENT_FRAME_COUNT = 8;
+const MONSTER_MOVEMENT_FRAME_COUNT = 8;
+const MONSTER_WALK_CYCLE_PIXELS = Object.freeze({ default: 52, rogue: 62, boss: 76 });
+const monsterWalkCyclePixels=enemy=>enemy.isBoss?MONSTER_WALK_CYCLE_PIXELS.boss:enemy.type==='rogue_cultivator'?MONSTER_WALK_CYCLE_PIXELS.rogue:MONSTER_WALK_CYCLE_PIXELS.default;
 const skillPanelStateSignature=system=>JSON.stringify({
   faction:system.faction,
   realmId:system.realmId,
@@ -74,7 +77,7 @@ export class CultivationGame {
     this.state = { running: false, paused: false, meditation: false, dashTime: 0, dashCooldown: 0, invulnerableUntil: 0, joined: false };
     this.profile.resources = { linhThach:0, linhThao:0, linhCot:0, hoTamDan:0, ...(this.profile.resources??{}) };
     this.keys = new Set(); this.enemies = new Map(); this.remotePlayers = new Map();
-    this.effects = []; this.pendingEffects = []; this.damageNumbers = []; this.cooldowns = new Map(); this.cooldownTotals = new Map(); this.pendingCasts = new Set(); this.castWarningTimes = new Map(); this.lastFrame = performance.now(); this.lastUiFrame = 0; this.netTime = 0;
+    this.effects = []; this.pendingEffects = []; this.damageNumbers = []; this.cooldowns = new Map(); this.cooldownTotals = new Map(); this.pendingCasts = new Set(); this.castWarningTimes = new Map(); this.lastFrame = performance.now(); this.lastUiFrame = 0; this.netTime = 0; this.locomotionPixels = 0;
     this.mouse = { x: 0, y: 0, active: false }; this.pointTarget = null; this.lockedTargetId = null;
     this.hudVisibleUntil = performance.now() + 10_000; this.hudHover = false; this.bossEngaged = false;
     this.bossCombatUntil = 0;
@@ -309,24 +312,36 @@ export class CultivationGame {
       this.player.velocity.x = lerp(this.player.velocity.x, direction.x * movementSpeed, t);
       this.player.velocity.z = lerp(this.player.velocity.z, direction.z * movementSpeed, t);
     }
-    this.player.position.x = clamp(this.player.position.x + this.player.velocity.x * dt, -48, 48);
-    this.player.position.z = clamp(this.player.position.z + this.player.velocity.z * dt, -48, 48);
+    const previousX=this.player.position.x,previousZ=this.player.position.z;
+    this.player.position.x = clamp(previousX + this.player.velocity.x * dt, -48, 48);
+    this.player.position.z = clamp(previousZ + this.player.velocity.z * dt, -48, 48);
     this.player.position.y = lerp(this.player.position.y??0,0,1-Math.exp(-8*dt));
     this.player.actionTime += dt;
     if (!this.state.meditation && !this.state.blocking && this.player.action !== 'idle' && this.player.actionTime > .58) this.player.action = 'idle';
-    const playerSpeed=Math.hypot(this.player.velocity.x,this.player.velocity.z);
+    const travelledX=this.player.position.x-previousX,travelledZ=this.player.position.z-previousZ;
+    const travelledPixels=Math.hypot(travelledX*18,travelledZ*12);
+    const playerSpeed=dt>0?Math.hypot(travelledX,travelledZ)/dt:0;
+    this.locomotionPixels+=travelledPixels;
     this.animationController.resolve({action:this.player.action,speed:playerSpeed,running:playerSpeed>PLAYER_MOTION.walkSpeed*.85,hurt:this.player.getFeedback().flashing,blocking:this.state.blocking,dead:this.player.isDead});
-    this.animationController.update(dt);
+    if(['walk','run'].includes(this.animationController.state))this.animationController.seekLoop(this.locomotionPixels/PLAYER_MOTION.walkCyclePixels);
+    else this.animationController.update(dt);
     for(const enemy of this.enemies.values()){
       enemy.animator??=new AnimationController(MONSTER_ANIMATION_CLIPS);
-      const state=enemy.alive===false?'death':enemy.hurt>0?'hurt':enemy.pendingAttack?'attack':(enemy.moveSpeed??0)>.05?'walk':'idle';
-      if(enemy.animator.state!==state||enemy.animator.finished&&state!=='death')enemy.animator.play(state,{},state==='hurt'||state==='attack');
-      enemy.animator.update(dt);
       enemy.hurt=Math.max(0,(enemy.hurt??0)-dt);
       const smooth=1-Math.exp(-11*dt);
+      const previousEnemyX=enemy.position.x,previousEnemyZ=enemy.position.z;
       enemy.position.x=lerp(enemy.position.x,enemy.target?.x??enemy.position.x,smooth);
       enemy.position.y=lerp(enemy.position.y,enemy.target?.y??enemy.position.y,smooth);
       enemy.position.z=lerp(enemy.position.z,enemy.target?.z??enemy.position.z,smooth);
+      const enemyDx=enemy.position.x-previousEnemyX,enemyDz=enemy.position.z-previousEnemyZ;
+      const enemyTravelPixels=Math.hypot(enemyDx*18,enemyDz*12);
+      enemy.locomotionPixels=(enemy.locomotionPixels??0)+enemyTravelPixels;
+      enemy.renderVelocity={x:dt>0?enemyDx/dt:0,z:dt>0?enemyDz/dt:0};
+      enemy.isVisuallyMoving=enemyTravelPixels>.02;
+      enemy.walkFrame=loopFrameForDistance(enemy.locomotionPixels,monsterWalkCyclePixels(enemy),MONSTER_MOVEMENT_FRAME_COUNT);
+      const state=enemy.alive===false?'death':enemy.hurt>0?'hurt':enemy.pendingAttack?'attack':enemy.isVisuallyMoving?'walk':'idle';
+      if(enemy.animator.state!==state||enemy.animator.finished&&state!=='death')enemy.animator.play(state,{},state==='hurt'||state==='attack');
+      if(state!=='walk')enemy.animator.update(dt);
     }
     // Network snapshots arrive at 20 Hz, while rendering normally runs at
     // 60+ FPS. Interpolate remote players on every rendered frame instead of
@@ -334,12 +349,22 @@ export class CultivationGame {
     const remoteSmooth=1-Math.exp(-12*dt);
     for(const remote of this.remotePlayers.values()){
       remote.position??=pos(remote.target);
+      const previousRemoteX=remote.position.x,previousRemoteZ=remote.position.z;
       remote.position.x=lerp(remote.position.x,remote.target?.x??remote.position.x,remoteSmooth);
       remote.position.y=lerp(remote.position.y,remote.target?.y??remote.position.y,remoteSmooth);
       remote.position.z=lerp(remote.position.z,remote.target?.z??remote.position.z,remoteSmooth);
+      const remoteDx=remote.position.x-previousRemoteX,remoteDz=remote.position.z-previousRemoteZ;
+      const remoteTravelPixels=Math.hypot(remoteDx*18,remoteDz*12);
+      remote.locomotionPixels=(remote.locomotionPixels??0)+remoteTravelPixels;
+      remote.renderVelocity={x:dt>0?remoteDx/dt:0,z:dt>0?remoteDz/dt:0};
+      remote.isVisuallyMoving=remoteTravelPixels>.02;
+      remote.walkFrame=loopFrameForDistance(remote.locomotionPixels,PLAYER_MOTION.walkCyclePixels,MOVEMENT_FRAME_COUNT);
     }
-    const cameraT = 1 - Math.exp(-PLAYER_MOTION.cameraSharpness * dt);
-    this.camera.x = lerp(this.camera.x, this.player.position.x, cameraT); this.camera.z = lerp(this.camera.z, this.player.position.z, cameraT);
+    // Keep the local player and floor on one camera sample. A damped camera
+    // trails the player by several world pixels and makes the feet appear to
+    // slide over the map even though both use the same world coordinates.
+    this.camera.x = this.player.position.x;
+    this.camera.z = this.player.position.z;
     for (let i = this.effects.length - 1; i >= 0; i--) { const effect = this.effects[i]; effect.life -= dt; if (effect.type === 'wave') { effect.x += effect.dx * 15 * dt; effect.z += effect.dz * 15 * dt; } if(effect.type==='burst'||effect.type==='spark'){effect.x+=effect.dx*5*dt;effect.z+=effect.dz*5*dt;}if(effect.type==='spirit')effect.z-=dt*.7;if (effect.life <= 0) this.effects.splice(i, 1); }
     const now=performance.now();for(let i=this.pendingEffects.length-1;i>=0;i--)if(now>=this.pendingEffects[i].at){const effect=this.pendingEffects.splice(i,1)[0];this.effects.push({...effect,life:.65,max:.65});}
     for(let i=this.damageNumbers.length-1;i>=0;i--){this.damageNumbers[i].life-=dt;this.damageNumbers[i].z-=dt*.55;if(this.damageNumbers[i].life<=0)this.damageNumbers.splice(i,1);}
@@ -507,8 +532,8 @@ export class CultivationGame {
 
   drawSprite(entity, faction, remote = false) {
     const p = this.screen(entity.position); const action = entity.action ?? 'idle'; const row={orthodox:0,demonic:1,heretic:2}[faction]??0;
-    const vx=entity.velocity?.x??0,vz=entity.velocity?.z??0,moving=Math.hypot(vx,vz)>.3,localWalk=entity===this.player&&['walk','run'].includes(this.animationController.state),vertical=Math.abs(vz)>Math.abs(vx)*.72,directionalAtlas=vertical?(vz<0?this.walkUpSprite:this.walkDownSprite):this.walkSprite,useWalk=moving&&(remote||localWalk)&&directionalAtlas.complete&&directionalAtlas.naturalWidth;
-    const frame=useWalk?(entity===this.player?this.animationController.frame:Math.floor(performance.now()*(Math.hypot(entity.velocity?.x??0,entity.velocity?.z??0) > 5 ? .022 : .018)+(entity.id?.length??0))%MOVEMENT_FRAME_COUNT):entity===this.player?this.animationController.frame:action==='slash'?2:(action==='cast'||action==='block')?3:0;
+    const motion=remote?(entity.renderVelocity??entity.velocity):entity.velocity,vx=motion?.x??0,vz=motion?.z??0,localWalk=entity===this.player&&['walk','run'].includes(this.animationController.state),moving=remote?entity.isVisuallyMoving:Math.hypot(vx,vz)>.3,vertical=Math.abs(vz)>Math.abs(vx)*.72,directionalAtlas=vertical?(vz<0?this.walkUpSprite:this.walkDownSprite):this.walkSprite,useWalk=moving&&(remote||localWalk)&&directionalAtlas.complete&&directionalAtlas.naturalWidth;
+    const frame=useWalk?(entity===this.player?this.animationController.frame:entity.walkFrame??0):entity===this.player?this.animationController.frame:action==='slash'?2:(action==='cast'||action==='block')?3:0;
     const atlas=useWalk?directionalAtlas:this.sprite,columns=useWalk?MOVEMENT_FRAME_COUNT:4;
     if (atlas.complete && atlas.naturalWidth) {
       const sw = atlas.naturalWidth / columns, sh = atlas.naturalHeight / 3, size = remote ? 64 : 72;
@@ -522,8 +547,14 @@ export class CultivationGame {
 
   drawEnemy(enemy) {
     if ((enemy.alive === false || enemy.hp <= 0) && enemy.animator?.finished) return; const p = this.screen(enemy.position); const imp = enemy.type === 'flame_imp', trash = imp || enemy.type === 'spirit_fox';
+    const renderSize=enemy.isBoss?126:enemy.type==='rogue_cultivator'?96:82;
+    const spriteTop=p.y-renderSize*.92,spriteBottom=p.y+renderSize*.12,spriteLeft=p.x-renderSize*.55,spriteRight=p.x+renderSize*.55;
+    if(spriteRight<0||spriteLeft>this.canvas.width||spriteBottom<0||spriteTop>this.canvas.height)return;
+    // Avoid showing severed sprite pieces at the canvas boundary. The minimap
+    // still communicates enemies just outside the visible play area.
+    if(spriteLeft<0||spriteRight>this.canvas.width||spriteTop<0||spriteBottom>this.canvas.height)return;
     if(enemy.id===this.lockedTargetId&&enemy.alive!==false){this.ctx.save();this.ctx.strokeStyle='#ffe27a';this.ctx.lineWidth=2;this.ctx.beginPath();this.ctx.ellipse(p.x,p.y-3,18,8,0,0,Math.PI*2);this.ctx.stroke();this.ctx.restore();}
-    if(this.monsterSprite.complete&&this.monsterSprite.naturalWidth&&enemy.animator){const fallbackRow=enemy.isBoss||enemy.type==='rogue_cultivator'?2:imp?1:0,row=Number.isInteger(enemy.spriteVariant)?enemy.spriteVariant:fallbackRow,dx=(enemy.target?.x??enemy.position.x)-enemy.position.x,dz=(enemy.target?.z??enemy.position.z)-enemy.position.z,vertical=Math.abs(dz)>Math.abs(dx)*.72,directionalAtlas=vertical?(dz<0?this.monsterWalkUpSprite:this.monsterWalkDownSprite):this.monsterWalkSprite,useWalk=enemy.animator.state==='walk'&&directionalAtlas.complete&&directionalAtlas.naturalWidth,atlas=useWalk?directionalAtlas:this.monsterSprite,columns=useWalk?MOVEMENT_FRAME_COUNT:22,frame=useWalk?Math.floor(performance.now()*.018+(enemy.id?.length??0))%MOVEMENT_FRAME_COUNT:enemy.attackFrame?.(performance.now())??enemy.animator.frame,sw=atlas.naturalWidth/columns,sh=atlas.naturalHeight/3,size=enemy.isBoss?126:enemy.type==='rogue_cultivator'?96:82,wave=Math.max(1,Number(enemy.wave)||1),hue=(wave-1)*47%360;this.ctx.save();if(enemy.hurt>0)this.ctx.filter='brightness(1.5) sepia(1) saturate(8) hue-rotate(315deg)';else if(wave>1)this.ctx.filter=`hue-rotate(${hue}deg) saturate(${1+Math.min(.75,wave*.06)}) brightness(${1+Math.min(.18,wave*.015)})`;if(useWalk&&!vertical&&dx<0){this.ctx.translate(p.x*2,0);this.ctx.scale(-1,1);}this.ctx.drawImage(atlas,frame*sw,row*sh,sw,sh,p.x-size/2,p.y-size*.9,size,size);this.ctx.restore();if(enemy.alive!==false){const ratio=clamp(enemy.hp/Math.max(1,enemy.maxHp),0,1),barY=p.y-(enemy.isBoss?58:38);this.pixelRect(p.x-18,barY,36,3,'#180b12');this.pixelRect(p.x-18,barY,36*ratio,3,wave>=8?'#c45cff':wave>=4?'#ff8b3d':'#ef4b5c');this.ctx.fillStyle='#ffe7a0';this.ctx.font='bold 7px monospace';this.ctx.textAlign='center';this.ctx.fillText(`Lv.${enemy.level??wave} · Vòng ${wave}`,Math.round(p.x),Math.round(barY-3));}return;}
+    if(this.monsterSprite.complete&&this.monsterSprite.naturalWidth&&enemy.animator){const fallbackRow=enemy.isBoss||enemy.type==='rogue_cultivator'?2:imp?1:0,row=Number.isInteger(enemy.spriteVariant)?enemy.spriteVariant:fallbackRow,dx=enemy.renderVelocity?.x??0,dz=enemy.renderVelocity?.z??0,vertical=Math.abs(dz)>Math.abs(dx)*.72,directionalAtlas=vertical?(dz<0?this.monsterWalkUpSprite:this.monsterWalkDownSprite):this.monsterWalkSprite,useWalk=enemy.animator.state==='walk'&&enemy.isVisuallyMoving&&directionalAtlas.complete&&directionalAtlas.naturalWidth,atlas=useWalk?directionalAtlas:this.monsterSprite,columns=useWalk?MONSTER_MOVEMENT_FRAME_COUNT:22,frame=useWalk?enemy.walkFrame??0:enemy.attackFrame?.(performance.now())??enemy.animator.frame,sw=atlas.naturalWidth/columns,sh=atlas.naturalHeight/3,size=renderSize,wave=Math.max(1,Number(enemy.wave)||1),hue=(wave-1)*47%360;this.ctx.save();if(enemy.alive===false||enemy.hp<=0)this.ctx.globalAlpha=clamp(1-enemy.animator.normalizedTime,0,1);if(enemy.hurt>0)this.ctx.filter='brightness(1.5) sepia(1) saturate(8) hue-rotate(315deg)';else if(wave>1)this.ctx.filter=`hue-rotate(${hue}deg) saturate(${1+Math.min(.75,wave*.06)}) brightness(${1+Math.min(.18,wave*.015)})`;if(useWalk&&!vertical&&dx<0){this.ctx.translate(p.x*2,0);this.ctx.scale(-1,1);}this.ctx.drawImage(atlas,frame*sw,row*sh,sw,sh,p.x-size/2,p.y-size*.9,size,size);this.ctx.restore();if(enemy.alive!==false){const ratio=clamp(enemy.hp/Math.max(1,enemy.maxHp),0,1),barY=p.y-(enemy.isBoss?58:38);this.pixelRect(p.x-18,barY,36,3,'#180b12');this.pixelRect(p.x-18,barY,36*ratio,3,wave>=8?'#c45cff':wave>=4?'#ff8b3d':'#ef4b5c');this.ctx.fillStyle='#ffe7a0';this.ctx.font='bold 7px monospace';this.ctx.textAlign='center';this.ctx.fillText(`Lv.${enemy.level??wave} · Vòng ${wave}`,Math.round(p.x),Math.round(barY-3));}return;}
     this.ctx.save(); if (enemy.hurt > 0) { this.ctx.globalAlpha = .55 + Math.sin(performance.now() * .05) * .35; this.ctx.translate(Math.sin(performance.now() * .08) * 2, 0); }
     if (imp) { this.pixelRect(p.x - 6,p.y - 13,12,12,'#25162c'); this.pixelRect(p.x - 4,p.y - 19,8,8,'#dc3564'); this.pixelRect(p.x - 2,p.y - 12,2,2,'#ffd56b'); }
     else if (enemy.isBoss) { this.pixelRect(p.x-16,p.y-37,32,35,'#352839'); this.pixelRect(p.x-12,p.y-45,24,12,'#9a3046'); this.pixelRect(p.x-24,p.y-29,48,8,'#bf8b3a'); }
