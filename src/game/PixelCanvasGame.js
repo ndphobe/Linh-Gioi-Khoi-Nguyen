@@ -20,7 +20,7 @@ import { SkillTreePanel } from './UI/SkillTreePanel.js';
 import { TribulationScreen } from './TribulationScreen.js';
 
 export const PLAYER_MOTION = Object.freeze({
-  walkSpeed: 4.7, acceleration: 13, deceleration: 17,
+  walkSpeed: 5.65, acceleration: 18, deceleration: 22,
   dashDistance: 4.4, dashDuration: .18, dashCooldown: 1.2, dashIFrames: .32,
   walkCyclePixels: 58,
 });
@@ -32,8 +32,8 @@ const COLORS = Object.freeze({
 });
 const KEYS_TO_SLOT = { KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f', KeyG: 'g' };
 const TRIBULATION_WAVES = 10;
-const MOVEMENT_FRAME_COUNT = 8;
-const MONSTER_MOVEMENT_FRAME_COUNT = 8;
+const MOVEMENT_FRAME_COUNT = 9;
+const MONSTER_MOVEMENT_FRAME_COUNT = 9;
 const MONSTER_WALK_CYCLE_PIXELS = Object.freeze({ default: 52, rogue: 62, boss: 76 });
 const monsterWalkCyclePixels=enemy=>enemy.isBoss?MONSTER_WALK_CYCLE_PIXELS.boss:enemy.type==='rogue_cultivator'?MONSTER_WALK_CYCLE_PIXELS.rogue:MONSTER_WALK_CYCLE_PIXELS.default;
 const skillPanelStateSignature=system=>JSON.stringify({
@@ -54,6 +54,18 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const statValue = value => Number((Number(value)||0).toFixed(2));
 const lerp = (a, b, t) => a + (b - a) * t;
 const pos = (value = {}) => ({ x: Number(value.x) || 0, y: Number(value.y) || 0, z: Number(value.z) || 0 });
+const loadChromaAtlas = src => {
+  const image = new Image(); let cleaned = false;
+  image.onload = () => {
+    if (cleaned || src.startsWith('data:')) return;
+    const canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+    const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
+    const pixels=context.getImageData(0,0,canvas.width,canvas.height),data=pixels.data;
+    for(let i=0;i<data.length;i+=4){const r=data[i],g=data[i+1],b=data[i+2],key=g-Math.max(r,b);if(key>24){data[i+3]=clamp(255-(key-24)*5,0,255);data[i+1]=Math.min(g,Math.max(r,b)+18);}}
+    context.putImageData(pixels,0,0);cleaned=true;image.src=canvas.toDataURL('image/png');
+  };
+  image.src=src; return image;
+};
 
 export class CultivationGame {
   constructor({ canvas, socket, profile, audio, onProfileChange, onExit }) {
@@ -73,7 +85,7 @@ export class CultivationGame {
     this.profile.currentRegion ??= 'sect_hall';
     this.player = new Player(this.profile, this.cultivationSystem, { position: { x: 0, y: 0, z: 26 }, velocity: { x: 0, z: 0 }, facing: 4, aimAngle: 0, action: 'idle' });
     this.animationController = new AnimationController(PLAYER_ANIMATION_CLIPS);
-    this.camera = { x: 0, z: 26 };
+    this.camera = { x: 0, z: 26, focusX: 0, focusZ: 26 };
     this.state = { running: false, paused: false, meditation: false, dashTime: 0, dashCooldown: 0, invulnerableUntil: 0, joined: false };
     this.profile.resources = { linhThach:0, linhThao:0, linhCot:0, hoTamDan:0, ...(this.profile.resources??{}) };
     this.keys = new Set(); this.enemies = new Map(); this.remotePlayers = new Map();
@@ -83,13 +95,13 @@ export class CultivationGame {
     this.bossCombatUntil = 0;
     this.terrainProps = this.createTerrainProps();
     this.sprite = new Image(); this.sprite.src = '/assets/sect-character-atlas.png';
-    this.walkSprite = new Image(); this.walkSprite.src = '/assets/sect-character-walk-atlas-v3.png';
-    this.walkUpSprite = new Image(); this.walkUpSprite.src = '/assets/sect-character-walk-up-v3.png';
-    this.walkDownSprite = new Image(); this.walkDownSprite.src = '/assets/sect-character-walk-down-v3.png';
+    this.walkSprite = loadChromaAtlas('/assets/sect-character-walk-atlas-v4.png');
+    this.walkUpSprite = loadChromaAtlas('/assets/sect-character-walk-up-v4.png');
+    this.walkDownSprite = loadChromaAtlas('/assets/sect-character-walk-down-v4.png');
     this.monsterSprite = new Image(); this.monsterSprite.src = '/assets/xianxia-monsters-atlas-v2-packed.png';
-    this.monsterWalkSprite = new Image(); this.monsterWalkSprite.src = '/assets/xianxia-monsters-walk-atlas-v3.png';
-    this.monsterWalkUpSprite = new Image(); this.monsterWalkUpSprite.src = '/assets/xianxia-monsters-walk-up-v3.png';
-    this.monsterWalkDownSprite = new Image(); this.monsterWalkDownSprite.src = '/assets/xianxia-monsters-walk-down-v3.png';
+    this.monsterWalkSprite = loadChromaAtlas('/assets/xianxia-monsters-walk-atlas-v4.png');
+    this.monsterWalkUpSprite = loadChromaAtlas('/assets/xianxia-monsters-walk-up-v4.png');
+    this.monsterWalkDownSprite = loadChromaAtlas('/assets/xianxia-monsters-walk-down-v4.png');
     this.floorTextures=Object.fromEntries(Object.entries({sect_hall:'sect-hall-floor-v3.png',luoyang:'luoyang-floor-v3.png',spirit_mine:'spirit-mine-floor-v3.png',heaven_sect:'heaven-sect-floor-v3.png'}).map(([region,file])=>{const image=new Image();image.src=`/assets/${file}`;return [region,image];}));
     this.cleanup = [];
     this.ui = this.collectUI();
@@ -363,8 +375,12 @@ export class CultivationGame {
     // Keep the local player and floor on one camera sample. A damped camera
     // trails the player by several world pixels and makes the feet appear to
     // slide over the map even though both use the same world coordinates.
-    this.camera.x = this.player.position.x;
-    this.camera.z = this.player.position.z;
+    const cameraSpeed=Math.hypot(this.player.velocity.x,this.player.velocity.z),look=Math.min(2.8,cameraSpeed*.34);
+    const targetCameraX=this.player.position.x+(cameraSpeed>.2?this.player.velocity.x/cameraSpeed*look:0);
+    const targetCameraZ=this.player.position.z+(cameraSpeed>.2?this.player.velocity.z/cameraSpeed*look:0);
+    const cameraBlend=1-Math.exp(-dt*10.5);
+    this.camera.x=lerp(this.camera.x,targetCameraX,cameraBlend);this.camera.z=lerp(this.camera.z,targetCameraZ,cameraBlend);
+    this.camera.focusX=this.player.position.x;this.camera.focusZ=this.player.position.z;
     for (let i = this.effects.length - 1; i >= 0; i--) { const effect = this.effects[i]; effect.life -= dt; if (effect.type === 'wave') { effect.x += effect.dx * 15 * dt; effect.z += effect.dz * 15 * dt; } if(effect.type==='burst'||effect.type==='spark'){effect.x+=effect.dx*5*dt;effect.z+=effect.dz*5*dt;}if(effect.type==='spirit')effect.z-=dt*.7;if (effect.life <= 0) this.effects.splice(i, 1); }
     const now=performance.now();for(let i=this.pendingEffects.length-1;i>=0;i--)if(now>=this.pendingEffects[i].at){const effect=this.pendingEffects.splice(i,1)[0];this.effects.push({...effect,life:.65,max:.65});}
     for(let i=this.damageNumbers.length-1;i>=0;i--){this.damageNumbers[i].life-=dt;this.damageNumbers[i].z-=dt*.55;if(this.damageNumbers[i].life<=0)this.damageNumbers.splice(i,1);}
@@ -493,7 +509,11 @@ export class CultivationGame {
   positionItemTooltip(event){const tip=this.inventoryUI?.querySelector('.item-tooltip');if(!tip||tip.hidden)return;tip.style.left=`${Math.min(innerWidth-280,event.clientX+16)}px`;tip.style.top=`${Math.min(innerHeight-190,event.clientY+16)}px`;}
   toggleInventory(){this.renderInventory();return this.hudManager.toggle('inventory');}
 
-  createTerrainProps(){const props=[];let seed=9173;const random=()=>((seed=seed*16807%2147483647)-1)/2147483646;for(let i=0;i<75;i++){const x=random()*92-46,z=random()*92-46;if(Math.abs(x)<5)continue;props.push({x,z,type:i%7===0?'rock':i%5===0?'fence':'tree'});}return props;}
+  createTerrainProps(){
+    const layouts={},types={sect_hall:['pine','lotus','lantern'],luoyang:['peach','willow','lantern'],spirit_mine:['crystal','mushroom','rock'],heaven_sect:['cloudpine','lotus','cloud']};
+    Object.keys(types).forEach((region,regionIndex)=>{let seed=9173+regionIndex*7919;const random=()=>((seed=seed*16807%2147483647)-1)/2147483646;layouts[region]=[];for(let i=0;i<64;i++){const x=random()*94-47,z=random()*94-47;if(Math.abs(x)<6&&Math.abs(z-10)<25)continue;layouts[region].push({x,z,type:types[region][i%types[region].length],phase:random()*Math.PI*2,scale:.8+random()*.45});}});
+    return layouts;
+  }
 
   screen(world) { return { x: this.canvas.width / 2 - this.camera.x * 18 + world.x * 18, y: this.canvas.height / 2 - this.camera.z * 12 + world.z * 12-(Number(world.y)||0)*4 }; }
   pixelRect(x, y, w, h, color) { this.ctx.fillStyle = color; this.ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); }
@@ -515,9 +535,12 @@ export class CultivationGame {
       const tile = 36, ox = ((-this.camera.x * 18) % tile + tile) % tile, oy = ((-this.camera.z * 12) % 24 + 24) % 24;
       for (let y = oy - 24; y < h; y += 24) for (let x = ox - tile; x < w; x += tile) { c.fillStyle = ((x / tile + y / 24) & 1) ? theme.tileA : theme.tileB; c.fillRect(x, y, tile - 1, 23); c.fillStyle = theme.line; c.fillRect(x, y, tile - 1, 1);c.globalAlpha=.38;c.fillStyle=theme.accent;c.fillRect(x+7,y+7,13,1);c.globalAlpha=1; }
     }
-    if(!texturedMap)for(const prop of this.terrainProps){const p=this.screen(prop);if(p.x<-35||p.x>w+35||p.y<-60||p.y>h+35)continue;if(theme.prop==='crystal')this.drawCrystal(p.x,p.y,theme);else if(theme.prop==='cloud')this.drawCloudPine(p.x,p.y,theme);else if(prop.type==='tree')this.drawTree(p.x,p.y,theme);else if(prop.type==='rock')this.drawRock(p.x,p.y,theme);else this.drawFence(p.x,p.y,theme);}
+    this.drawWaterFeature(theme);
+    for(const prop of this.terrainProps[this.profile.currentRegion]??[]){const p=this.screen(prop);if(p.x<-45||p.x>w+45||p.y<-65||p.y>h+40)continue;this.drawTerrainProp(prop,p,theme);}
     this.drawRegionLandmark(theme);
   }
+  drawWaterFeature(theme){const region=this.profile.currentRegion,center={sect_hall:{x:-22,z:8,rx:7,rz:5},luoyang:{x:19,z:15,rx:10,rz:4},spirit_mine:{x:-18,z:-13,rx:6,rz:6},heaven_sect:{x:16,z:-17,rx:9,rz:5}}[region],p=this.screen(center),time=performance.now()*.001;if(p.x<-220||p.x>this.canvas.width+220||p.y<-120||p.y>this.canvas.height+120)return;this.ctx.save();this.ctx.fillStyle=region==='spirit_mine'?'rgba(56,186,222,.38)':'rgba(50,137,159,.32)';this.ctx.beginPath();this.ctx.ellipse(p.x,p.y,center.rx*18,center.rz*12,0,0,Math.PI*2);this.ctx.fill();this.ctx.strokeStyle=theme.accent;this.ctx.globalAlpha=.38;for(let i=-2;i<=2;i++){this.ctx.beginPath();this.ctx.ellipse(p.x+Math.sin(time+i)*12,p.y+i*7,35+i*5,4,0,0,Math.PI*2);this.ctx.stroke();}this.ctx.restore();}
+  drawTerrainProp(prop,p,theme){const time=performance.now()*.001,sway=Math.sin(time*1.35+prop.phase)*2.2*prop.scale;this.ctx.save();this.ctx.translate(p.x,p.y);this.ctx.scale(prop.scale,prop.scale);if(['pine','peach','willow','cloudpine'].includes(prop.type)){this.pixelRect(-3,-15,6,17,prop.type==='willow'?'#72523a':'#5d3d2b');this.ctx.translate(sway,0);const foliage=prop.type==='peach'?'#c35f79':prop.type==='willow'?'#527b4a':prop.type==='cloudpine'?'#719ca1':'#276044';this.pixelRect(-13,-31,26,10,foliage);this.pixelRect(-9,-41,18,12,prop.type==='peach'?'#e58aa0':theme.accent);if(prop.type==='willow'){this.pixelRect(-12,-25,3,17,'#668c51');this.pixelRect(9,-27,3,19,'#668c51');}}else if(prop.type==='crystal')this.drawCrystal(0,0,theme);else if(prop.type==='rock')this.drawRock(0,0,theme);else if(prop.type==='cloud'){this.ctx.globalAlpha=.28+.08*Math.sin(time+prop.phase);this.ctx.fillStyle='#e9fbff';this.ctx.beginPath();this.ctx.ellipse(sway,-10,21,7,0,0,Math.PI*2);this.ctx.fill();}else if(prop.type==='lotus'){this.ctx.fillStyle='#df8fc1';this.ctx.beginPath();this.ctx.arc(sway,-4,4,0,Math.PI*2);this.ctx.fill();}else if(prop.type==='mushroom'){this.pixelRect(-1,-7,3,7,'#c7d0bd');this.ctx.fillStyle='#68d8e8';this.ctx.beginPath();this.ctx.arc(sway,-8,6,Math.PI,Math.PI*2);this.ctx.fill();}else{this.pixelRect(-2,-18,4,18,'#6b4225');this.ctx.globalAlpha=.68+.2*Math.sin(time*3+prop.phase);this.pixelRect(-5+sway,-25,10,9,theme.accent);}this.ctx.restore();}
   drawTree(x,y,theme){this.pixelRect(x-3,y-13,6,15,theme?.prop==='city'?'#7e3c20':'#694329');this.pixelRect(x-12,y-29,24,14,theme?.prop==='city'?'#8a3d27':'#173f2c');this.pixelRect(x-9,y-39,18,14,theme?.prop==='city'?'#b04c32':'#20563a');this.pixelRect(x-5,y-47,10,12,theme?.accent??'#2e7047');}
   drawRock(x,y,theme){this.pixelRect(x-7,y-8,14,8,theme?.line??'#58666a');this.pixelRect(x-4,y-12,9,5,theme?.accent??'#798486');this.pixelRect(x-7,y-3,14,3,theme?.base??'#354649');}
   drawFence(x,y,theme){this.pixelRect(x-14,y-10,4,13,'#532a1c');this.pixelRect(x+10,y-10,4,13,'#532a1c');this.pixelRect(x-15,y-7,30,4,theme?.accent??'#9a6631');}

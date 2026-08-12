@@ -2,8 +2,8 @@ export const PLAYER_ANIMATION_CLIPS = Object.freeze({
   idle: Object.freeze({ frames: [0], fps: 6, loop: true }),
   // Movement uses the dedicated eight-column walk atlas. Combat states still
   // use the original four-column atlas and its authored impact poses.
-  walk: Object.freeze({ frames: [0,1,2,3,4,5,6,7], fps: 10, loop: true }),
-  run: Object.freeze({ frames: [0,1,2,3,4,5,6,7], fps: 14, loop: true }),
+  walk: Object.freeze({ frames: [0,1,2,3,4,5,6,7,8], fps: 14, loop: true }),
+  run: Object.freeze({ frames: [0,1,2,3,4,5,6,7,8], fps: 18, loop: true }),
   attack: Object.freeze({ frames: [0, 2, 2, 0], fps: 14, loop: false, markerFrame: 1 }),
   cast: Object.freeze({ frames: [0, 3, 3, 0], fps: 10, loop: false, markerFrame: 2 }),
   block: Object.freeze({ frames: [3], fps: 6, loop: true }),
@@ -13,7 +13,7 @@ export const PLAYER_ANIMATION_CLIPS = Object.freeze({
 
 export const MONSTER_ANIMATION_CLIPS = Object.freeze({
   idle: Object.freeze({ start: 0, count: 4, fps: 7, loop: true }),
-  walk: Object.freeze({ start: 4, count: 6, fps: 12, loop: true }),
+  walk: Object.freeze({ frames: [0,1,2,3,4,5,6,7,8], fps: 16, loop: true }),
   // Atlas frames 11-15 are transition/fade fragments. Reusing the last full
   // movement poses keeps the monster visible throughout its wind-up and hit.
   attack: Object.freeze({ frames: [7, 8, 9, 10, 9], fps: 12, loop: false, markerFrame: 2 }),
