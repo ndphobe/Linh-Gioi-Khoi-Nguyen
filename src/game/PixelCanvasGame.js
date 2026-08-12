@@ -32,8 +32,8 @@ const COLORS = Object.freeze({
 });
 const KEYS_TO_SLOT = { KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f', KeyG: 'g' };
 const TRIBULATION_WAVES = 10;
-const MOVEMENT_FRAME_COUNT = 9;
-const MONSTER_MOVEMENT_FRAME_COUNT = 9;
+const MOVEMENT_FRAME_COUNT = 12;
+const MONSTER_MOVEMENT_FRAME_COUNT = 12;
 const MONSTER_WALK_CYCLE_PIXELS = Object.freeze({ default: 52, rogue: 62, boss: 76 });
 const monsterWalkCyclePixels=enemy=>enemy.isBoss?MONSTER_WALK_CYCLE_PIXELS.boss:enemy.type==='rogue_cultivator'?MONSTER_WALK_CYCLE_PIXELS.rogue:MONSTER_WALK_CYCLE_PIXELS.default;
 const skillPanelStateSignature=system=>JSON.stringify({
@@ -61,7 +61,7 @@ const loadChromaAtlas = src => {
     const canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
     const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
     const pixels=context.getImageData(0,0,canvas.width,canvas.height),data=pixels.data;
-    for(let i=0;i<data.length;i+=4){const r=data[i],g=data[i+1],b=data[i+2],key=g-Math.max(r,b);if(key>24){data[i+3]=clamp(255-(key-24)*5,0,255);data[i+1]=Math.min(g,Math.max(r,b)+18);}}
+    for(let i=0;i<data.length;i+=4){const r=data[i],g=data[i+1],b=data[i+2],green=g-Math.max(r,b),magenta=Math.min(r,b)-g;if(green>24){data[i+3]=clamp(255-(green-24)*5,0,255);data[i+1]=Math.min(g,Math.max(r,b)+18);}else if(magenta>24){data[i+3]=clamp(255-(magenta-24)*5,0,255);data[i]=Math.min(r,g+18);data[i+2]=Math.min(b,g+18);}}
     context.putImageData(pixels,0,0);cleaned=true;image.src=canvas.toDataURL('image/png');
   };
   image.src=src; return image;
@@ -102,7 +102,8 @@ export class CultivationGame {
     this.monsterWalkSprite = loadChromaAtlas('/assets/xianxia-monsters-walk-atlas-v4.png');
     this.monsterWalkUpSprite = loadChromaAtlas('/assets/xianxia-monsters-walk-up-v4.png');
     this.monsterWalkDownSprite = loadChromaAtlas('/assets/xianxia-monsters-walk-down-v4.png');
-    this.floorTextures=Object.fromEntries(Object.entries({sect_hall:'sect-hall-floor-v3.png',luoyang:'luoyang-floor-v3.png',spirit_mine:'spirit-mine-floor-v3.png',heaven_sect:'heaven-sect-floor-v3.png'}).map(([region,file])=>{const image=new Image();image.src=`/assets/${file}`;return [region,image];}));
+    this.floorTextures=Object.fromEntries(Object.entries({sect_hall:'sect-hall-floor-v4.png',luoyang:'luoyang-floor-v4.png',spirit_mine:'spirit-mine-floor-v4.png',heaven_sect:'heaven-sect-floor-v4.png'}).map(([region,file])=>{const image=new Image();image.src=`/assets/${file}`;return [region,image];}));
+    this.decorationAtlas=loadChromaAtlas('/assets/map-decoration-atlas-v1.png');
     this.cleanup = [];
     this.ui = this.collectUI();
     this.sceneManager={load:scene=>{if(scene==='MainMenu'){this.destroy();this.onExit?.();}},respawnAtHall:()=>this.respawnAtHall()};
@@ -540,7 +541,7 @@ export class CultivationGame {
     this.drawRegionLandmark(theme);
   }
   drawWaterFeature(theme){const region=this.profile.currentRegion,center={sect_hall:{x:-22,z:8,rx:7,rz:5},luoyang:{x:19,z:15,rx:10,rz:4},spirit_mine:{x:-18,z:-13,rx:6,rz:6},heaven_sect:{x:16,z:-17,rx:9,rz:5}}[region],p=this.screen(center),time=performance.now()*.001;if(p.x<-220||p.x>this.canvas.width+220||p.y<-120||p.y>this.canvas.height+120)return;this.ctx.save();this.ctx.fillStyle=region==='spirit_mine'?'rgba(56,186,222,.38)':'rgba(50,137,159,.32)';this.ctx.beginPath();this.ctx.ellipse(p.x,p.y,center.rx*18,center.rz*12,0,0,Math.PI*2);this.ctx.fill();this.ctx.strokeStyle=theme.accent;this.ctx.globalAlpha=.38;for(let i=-2;i<=2;i++){this.ctx.beginPath();this.ctx.ellipse(p.x+Math.sin(time+i)*12,p.y+i*7,35+i*5,4,0,0,Math.PI*2);this.ctx.stroke();}this.ctx.restore();}
-  drawTerrainProp(prop,p,theme){const time=performance.now()*.001,sway=Math.sin(time*1.35+prop.phase)*2.2*prop.scale;this.ctx.save();this.ctx.translate(p.x,p.y);this.ctx.scale(prop.scale,prop.scale);if(['pine','peach','willow','cloudpine'].includes(prop.type)){this.pixelRect(-3,-15,6,17,prop.type==='willow'?'#72523a':'#5d3d2b');this.ctx.translate(sway,0);const foliage=prop.type==='peach'?'#c35f79':prop.type==='willow'?'#527b4a':prop.type==='cloudpine'?'#719ca1':'#276044';this.pixelRect(-13,-31,26,10,foliage);this.pixelRect(-9,-41,18,12,prop.type==='peach'?'#e58aa0':theme.accent);if(prop.type==='willow'){this.pixelRect(-12,-25,3,17,'#668c51');this.pixelRect(9,-27,3,19,'#668c51');}}else if(prop.type==='crystal')this.drawCrystal(0,0,theme);else if(prop.type==='rock')this.drawRock(0,0,theme);else if(prop.type==='cloud'){this.ctx.globalAlpha=.28+.08*Math.sin(time+prop.phase);this.ctx.fillStyle='#e9fbff';this.ctx.beginPath();this.ctx.ellipse(sway,-10,21,7,0,0,Math.PI*2);this.ctx.fill();}else if(prop.type==='lotus'){this.ctx.fillStyle='#df8fc1';this.ctx.beginPath();this.ctx.arc(sway,-4,4,0,Math.PI*2);this.ctx.fill();}else if(prop.type==='mushroom'){this.pixelRect(-1,-7,3,7,'#c7d0bd');this.ctx.fillStyle='#68d8e8';this.ctx.beginPath();this.ctx.arc(sway,-8,6,Math.PI,Math.PI*2);this.ctx.fill();}else{this.pixelRect(-2,-18,4,18,'#6b4225');this.ctx.globalAlpha=.68+.2*Math.sin(time*3+prop.phase);this.pixelRect(-5+sway,-25,10,9,theme.accent);}this.ctx.restore();}
+  drawTerrainProp(prop,p,theme){const time=performance.now()*.001,sway=Math.sin(time*1.35+prop.phase)*2.2*prop.scale,atlas=this.decorationAtlas,regionRow={sect_hall:0,luoyang:1,spirit_mine:2,heaven_sect:3}[this.profile.currentRegion]??0,typeColumn={pine:0,lotus:1,lantern:3,peach:0,willow:1,crystal:0,mushroom:2,rock:3,cloudpine:0,cloud:1}[prop.type]??2;if(atlas?.complete&&atlas.naturalWidth){const sw=atlas.naturalWidth/4,sh=atlas.naturalHeight/4,size=prop.type==='cloud'?52:prop.type==='lotus'||prop.type==='mushroom'?44:62;this.ctx.save();this.ctx.translate(p.x+sway,p.y);this.ctx.rotate(Math.sin(time+prop.phase)*.018);this.ctx.globalAlpha=prop.type==='cloud'?.72:1;if(['crystal','mushroom','lantern'].includes(prop.type))this.ctx.filter=`brightness(${1.02+Math.sin(time*2.4+prop.phase)*.16})`;this.ctx.drawImage(atlas,typeColumn*sw,regionRow*sh,sw,sh,-size/2,-size*.82,size,size);this.ctx.restore();return;}this.drawRock(p.x,p.y,theme);}
   drawTree(x,y,theme){this.pixelRect(x-3,y-13,6,15,theme?.prop==='city'?'#7e3c20':'#694329');this.pixelRect(x-12,y-29,24,14,theme?.prop==='city'?'#8a3d27':'#173f2c');this.pixelRect(x-9,y-39,18,14,theme?.prop==='city'?'#b04c32':'#20563a');this.pixelRect(x-5,y-47,10,12,theme?.accent??'#2e7047');}
   drawRock(x,y,theme){this.pixelRect(x-7,y-8,14,8,theme?.line??'#58666a');this.pixelRect(x-4,y-12,9,5,theme?.accent??'#798486');this.pixelRect(x-7,y-3,14,3,theme?.base??'#354649');}
   drawFence(x,y,theme){this.pixelRect(x-14,y-10,4,13,'#532a1c');this.pixelRect(x+10,y-10,4,13,'#532a1c');this.pixelRect(x-15,y-7,30,4,theme?.accent??'#9a6631');}

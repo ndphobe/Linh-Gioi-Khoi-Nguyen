@@ -70,9 +70,9 @@ test('animation markers fire once on the authored attack keyframe',()=>{
 test('locomotion animation phase is locked to travelled distance',()=>{
   const animation=new AnimationController(PLAYER_ANIMATION_CLIPS);
   animation.play('walk',{},true);
-  assert.equal(animation.seekLoop(.25),2);
-  assert.equal(animation.seekLoop(.5),4);
-  assert.equal(animation.seekLoop(1.25),2);
+  assert.equal(animation.seekLoop(.25),3);
+  assert.equal(animation.seekLoop(.5),6);
+  assert.equal(animation.seekLoop(1.25),3);
   assert.equal(loopFrameForDistance(29,58),4);
   assert.equal(loopFrameForDistance(87,58),4);
 });
