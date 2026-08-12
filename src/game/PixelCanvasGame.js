@@ -22,7 +22,7 @@ import { TribulationScreen } from './TribulationScreen.js';
 export const PLAYER_MOTION = Object.freeze({
   walkSpeed: 5.2, runSpeed: 7, acceleration: 18, deceleration: 22,
   dashDistance: 4.4, dashDuration: .18, dashCooldown: 1.2, dashIFrames: .32,
-  walkCyclePixels: 64, runCyclePixels: 48,
+  walkCyclePixels: 56, runCyclePixels: 40,
 });
 
 const COLORS = Object.freeze({
@@ -34,7 +34,7 @@ const KEYS_TO_SLOT = { KeyQ: 'q', KeyE: 'e', KeyR: 'r', KeyF: 'f', KeyG: 'g' };
 const TRIBULATION_WAVES = 10;
 const MOVEMENT_FRAME_COUNT = 8;
 const MONSTER_MOVEMENT_FRAME_COUNT = 8;
-const MONSTER_WALK_CYCLE_PIXELS = Object.freeze({ default: 52, rogue: 62, boss: 76 });
+const MONSTER_WALK_CYCLE_PIXELS = Object.freeze({ default: 44, rogue: 52, boss: 64 });
 const monsterWalkCyclePixels=enemy=>enemy.isBoss?MONSTER_WALK_CYCLE_PIXELS.boss:enemy.type==='rogue_cultivator'?MONSTER_WALK_CYCLE_PIXELS.rogue:MONSTER_WALK_CYCLE_PIXELS.default;
 const skillPanelStateSignature=system=>JSON.stringify({
   faction:system.faction,
@@ -521,13 +521,12 @@ export class CultivationGame {
     return layouts;
   }
   terrainColliders(){
-    const radius={pine:1.05,peach:1.05,willow:1.15,cloudpine:1.05,crystal:.9,mushroom:.62,rock:.9,lantern:.62,lotus:.5,cloud:0},props=(this.terrainProps[this.profile.currentRegion]??[]).map(prop=>({x:prop.x,z:prop.z,r:(radius[prop.type]??.75)*prop.scale})).filter(item=>item.r>.1),gate=this.currentRegion().townGate;
-    props.push({x:gate.x-2.25,z:gate.z,r:.82},{x:gate.x+2.25,z:gate.z,r:.82});return props;
+    const radius={pine:1.05,peach:1.05,willow:1.15,cloudpine:1.05,crystal:.9,mushroom:.62,rock:.9,lantern:.62,lotus:.5,cloud:0};return (this.terrainProps[this.profile.currentRegion]??[]).map(prop=>({x:prop.x,z:prop.z,r:(radius[prop.type]??.75)*prop.scale})).filter(item=>item.r>.1);
   }
   resolveTerrainCollision(fromX,fromZ,toX,toZ){
-    const playerRadius=.48,water=WATER_FEATURES[this.profile.currentRegion],blocked=(x,z)=>this.terrainColliders().some(item=>Math.hypot(x-item.x,z-item.z)<playerRadius+item.r)||((x-water.x)/(water.rx+playerRadius))**2+((z-water.z)/(water.rz+playerRadius))**2<1;let x=toX,z=fromZ;
-    if(blocked(x,z)){x=fromX;this.player.velocity.x=0;}z=toZ;
-    if(blocked(x,z)){z=fromZ;this.player.velocity.z=0;}return{x,z};
+    const playerRadius=.48,water=WATER_FEATURES[this.profile.currentRegion],penetration=(x,z)=>{let depth=0;for(const item of this.terrainColliders())depth=Math.max(depth,playerRadius+item.r-Math.hypot(x-item.x,z-item.z));const ellipse=Math.sqrt(((x-water.x)/(water.rx+playerRadius))**2+((z-water.z)/(water.rz+playerRadius))**2);return Math.max(0,depth,1-ellipse);},start=penetration(fromX,fromZ);let x=toX,z=fromZ;
+    if(penetration(x,z)>start+1e-4){x=fromX;this.player.velocity.x=0;}z=toZ;
+    if(penetration(x,z)>start+1e-4){z=fromZ;this.player.velocity.z=0;}return{x,z};
   }
 
   screen(world) { return { x: this.canvas.width / 2 - this.camera.x * 18 + world.x * 18, y: this.canvas.height / 2 - this.camera.z * 12 + world.z * 12-(Number(world.y)||0)*4 }; }
